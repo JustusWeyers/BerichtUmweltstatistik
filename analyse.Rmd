@@ -16,6 +16,7 @@ library(car) # vif
 library(corrplot)
 library(GGally)
 library(visreg)
+library(Metrics)
 ```
 
 # Einstellungen
@@ -23,7 +24,6 @@ library(visreg)
 ```{r}
 tmap::tmap_mode("view")
 ```
-
 
 ### Daten einlesen
 
@@ -41,7 +41,7 @@ data = readin |> select(Punkt, Jahr, Stratum, x_UTM, y_UTM,
                         Bodenfeuchte_Prozent)
 
 data_sf = st_as_sf(data, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
-tm_shape(data_sf) + tm_dots(col = "Tiefe_zum_Oxidationshorizont_cm")
+tm_shape(data_sf) + tm_dots(col = "Bodenfeuchte_Prozent")
 
 modeldata =  data |> select(Tiefe_zum_Oxidationshorizont_cm, 
                               Maechtigkeit_Oxidationshorizont_cm, 
@@ -57,10 +57,19 @@ head(modeldata)
 
 ```{r}
 linmodel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
+```
+
+# 
+
+```{r}
 res = glmulti(linmodel, level = 1, method = "h",
-              confsetsize = 8)
-bestmodel = res@objects[[1]]
+              confsetsize = 8, crit = "AIC")
+mean(res@crits)
 plot(res, type = "s")
+
+bestmodel = res@objects[[1]]
+
+visreg(bestmodel)
 ```
 
 ```{r}
@@ -72,18 +81,31 @@ corrplot(cor_model, p.mat = p_values$p, insig = 'p-value', sig.level = -1)
 
 ```{r}
 vif(linmodel)
-plot(x = modeldata$Tiefe_zum_Oxidationshorizont_cm, y = modeldata$Maechtigkeit_Oxidationshorizont_cm, asp = 1)
 ```
 
 ```{r}
-visreg(bestmodel)
+
 ```
 
 # Predictions
 
 ```{r}
-newdata = modeldata[is.na(modeldata$Bodenfeuchte_Prozent),]
-x_plot = seq(0, 100)
-predict(bestmodel, newdata = data.frame())
+newdata = modeldata[,colnames(modeldata) != "Bodenfeuchte_Prozent"]
+data$prediction = predict(bestmodel, newdata = newdata)
+fehlerdf = data[!is.na(data$Bodenfeuchte_Prozent) & !is.na(data$prediction),]
+rmse(actual = fehlerdf$Bodenfeuchte_Prozent, predicted = fehlerdf$prediction)
+
+data$sqerr = (data$Bodenfeuchte_Prozent - data$prediction)^2
+
+ggplot(data, aes(x = Bodenfeuchte_Prozent, y = prediction)) +
+  geom_point(aes(col = as.factor(Stratum)))
+
+ggplot(data, aes(x = as.factor(Stratum), y = sqerr, fill = as.factor(Stratum))) +
+  geom_boxplot()
+```
+
+```{r}
+data_sf$predictions = c(data$prediction)
+tm_shape(data_sf) + tm_dots(col = "predictions")
 ```
 
