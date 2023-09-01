@@ -1,111 +1,228 @@
 ---
 title: "Umweltstatistik Bericht - R"
-author: "Justus Weyers"
+author: "Milena Mensching und Justus Weyers"
 date: "`r Sys.Date()`"
 output: html_document
 ---
 
-### Pakete laden
+# Pakete laden
 
 ```{r, warning=FALSE, message=FALSE}
+# Das Tidyverse
 library(tidyverse)
+
+# Plots
+library(GGally)
+library(corrplot)
+
+# Statistik
+library(Metrics)
+
+# Geo-Pakete
 library(sf)
 library(tmap)
+
+# Lineare Modelle
 library(glmulti)
 library(car) # vif
-library(corrplot)
-library(GGally)
 library(visreg)
-library(Metrics)
+
+# Baumbasierte Modelle
+library(tree)
+library(randomForest)
+library(quantregForest)
 ```
 
 # Einstellungen
 
-```{r}
+```{r, warning = FALSE, message=FALSE}
+# Seed festlegen
+set.seed(1)
+# Kartenansicht auf interaktiv einstellen
 tmap::tmap_mode("view")
 ```
 
-### Daten einlesen
+# Funktionsdefinitionen
 
 ```{r}
+# Funktion, um Modellvorhersage und Fehler an 
+# den zentralen Dataframe 'data' anzubinden
+pred = function(name, model, predictors, data, response) {
+  # Vorhersagewerte bestimmen
+  predictions = predict(model, newdata = predictors)
+  # Eigentliche Werte 
+  actual = data[rownames(predictors),response]
+  
+  # Vorhersage anbinden
+  data[,name] = rep(NA, nrow(data))
+  data[rownames(predictors),name] = predictions
+  
+  # Fehler anbinden
+  data[,paste0("err", name)] = rep(NA, nrow(data))
+  data[rownames(predictors),paste0("err", name)] = (predictions - actual)**2
+  
+  return(data)
+}
+
+# Funktion zur Berechnung von Gesamtvarianz (SST), 
+# nicht-erklärter Varianz (SSE) und R²
+var = function(yobs, ymod) {
+  SST = sum((yobs - mean(yobs))^2)
+  SSE = sum((yobs - ymod)^2)
+  R2 = 1-SSE/SST
+  vec = setNames(c(SST, SSE, R2), c("SST", "SSE", "R2"))
+  return(vec)
+}
+
+# Funktion, um aus einem Dataframe ein 
+# simple feature zu erstellen
+sf = function(df) {
+  st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
+}
+```
+
+# Daten einlesen
+
+```{r}
+# Inputdatei
+path = "Data/data.txt"
+
+# Response-Variable
+response = "Bodenfeuchte_Prozent"
+
 # Alles Einlesen
-readin = read.table("Data/data.txt", header = TRUE)
+readin = read.table(path, header = TRUE)
 
-# Verwendete Variablen auswählen
-data = readin |> select(Punkt, Jahr, Stratum, x_UTM, y_UTM,
-                        Tiefe_zum_Oxidationshorizont_cm, 
-                        Maechtigkeit_Oxidationshorizont_cm, 
-                        Maechtigkeit_A_Horizont_cm,
-                        Maechtigkeit_AL_Schicht_cm,
-                        Gelaendehoehe_m,
-                        Bodenfeuchte_Prozent)
+# Variablen von Interesse auswählen
+data = readin |> 
+  select(Punkt, Jahr, Stratum, x_UTM, y_UTM,
+         Tiefe_zum_Oxidationshorizont_cm, 
+         Maechtigkeit_Oxidationshorizont_cm, 
+         Maechtigkeit_A_Horizont_cm,
+         Maechtigkeit_AL_Schicht_cm,
+         Gelaendehoehe_m,
+         Bodenfeuchte_Prozent)
 
-data_sf = st_as_sf(data, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
-tm_shape(data_sf) + tm_dots(col = "Bodenfeuchte_Prozent")
+# Modelldaten selektieren
+modeldata =  data |> 
+  select(Tiefe_zum_Oxidationshorizont_cm,
+         Maechtigkeit_Oxidationshorizont_cm, 
+         Maechtigkeit_A_Horizont_cm,
+         Maechtigkeit_AL_Schicht_cm,
+         Gelaendehoehe_m,
+         Bodenfeuchte_Prozent) |> 
+  na.omit()
 
-modeldata =  data |> select(Tiefe_zum_Oxidationshorizont_cm, 
-                              Maechtigkeit_Oxidationshorizont_cm, 
-                              Maechtigkeit_A_Horizont_cm,
-                              Maechtigkeit_AL_Schicht_cm,
-                              Gelaendehoehe_m,
-                              Bodenfeuchte_Prozent)
+# Prädiktoren selektieren
+predictors = modeldata |> 
+  select(-one_of(response))
 
-head(modeldata)
+# Kartenansicht der Daten
+tm_shape(sf(data)) + tm_dots(col = response)
 ```
 
-# Einfaches lineares Modell
+# Datenexploration
 
-```{r}
-linmodel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
+```{r, warning = FALSE, message=FALSE}
+# Korrelationsmatrix
+# ggpairs(modeldata)
+
+# Alternativ:
+# cor_model = cor(modeldata, use = "pairwise.complete.obs")
+# p_values = cor.mtest(modeldata, conf.level = 0.95)
+# corrplot(cor_model, p.mat = p_values$p, insig = 'p-value', sig.level = -1)
 ```
 
-# 
+# Lineare Modelle
+
+## Einfaches lineares Modell
 
 ```{r}
-res = glmulti(linmodel, level = 1, method = "h",
-              confsetsize = 8, crit = "AIC")
+#ä Modellerstellung
+linModel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
+# Vorhersage und Fehler speichern
+data = pred(name = "linModel", model = linModel, predictors = predictors, 
+            data = data, response = response)
+# RMSE
+rmse(actual = data[!is.na(data$linModel), response], 
+     predicted = data[!is.na(data$linModel), "linModel"])
+# VIF
+vif(linModel)
+```
+
+## Bestes lineares Modell
+
+```{r}
+# Mögliche liineare Modelle nach Güte untersuchen und ordnen
+res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+# AICs
+plot(res)
 mean(res@crits)
+# Wichtigkeit von Prädiktoren
 plot(res, type = "s")
 
-bestmodel = res@objects[[1]]
+# Das beste Modell
+bestlinModel = res@objects[[1]]
+summary(bestlinModel)
+plot(bestlinModel)
+# visreg(bestModel) #?!
 
-visreg(bestmodel)
+# Vorhersage und Fehler speichern
+data = pred(name = "bestlinModel", model = bestlinModel, 
+            predictors = predictors, data = data, 
+            response = response)
+# RMSE
+rmse(actual = data[!is.na(data$bestlinModel), response], 
+     predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
 ```
 
-```{r}
-cor_model = cor(modeldata, use = "pairwise.complete.obs")
-p_values = cor.mtest(modeldata, conf.level = 0.95)
-corrplot(cor_model, p.mat = p_values$p, insig = 'p-value', sig.level = -1)
-```
-
+## Plots Lineare Modelle
 
 ```{r}
-vif(linmodel)
-```
-
-```{r}
-
-```
-
-# Predictions
-
-```{r}
-newdata = modeldata[,colnames(modeldata) != "Bodenfeuchte_Prozent"]
-data$prediction = predict(bestmodel, newdata = newdata)
-fehlerdf = data[!is.na(data$Bodenfeuchte_Prozent) & !is.na(data$prediction),]
-rmse(actual = fehlerdf$Bodenfeuchte_Prozent, predicted = fehlerdf$prediction)
-
-data$sqerr = (data$Bodenfeuchte_Prozent - data$prediction)^2
-
-ggplot(data, aes(x = Bodenfeuchte_Prozent, y = prediction)) +
+ggplot(data, aes(x = Bodenfeuchte_Prozent, y = linModel)) +
   geom_point(aes(col = as.factor(Stratum)))
 
-ggplot(data, aes(x = as.factor(Stratum), y = sqerr, fill = as.factor(Stratum))) +
+ggplot(data, aes(x = as.factor(Stratum), y = errlinModel, fill = as.factor(Stratum))) +
   geom_boxplot()
+
+tm_shape(sf(data)) + tm_dots(col = "linModel")
+```
+
+# Baum
+
+```{r}
+# Baum erstellen
+treeModel = tree(Bodenfeuchte_Prozent ~ ., data = modeldata)
+# Vorhersage und Fehler speichern
+data = pred(name = "treeModel", model = treeModel, 
+            predictors = predictors, data = data, 
+            response = response)
+# Baumplot
+{plot(treeModel);text(treeModel)}
+```
+# Baustelle
+
+```{r}
+# stack = na.omit(stack(data, select=c("errlinModel", "errbestlinModel", "errtreeModel")))
+# ggplot(stack, aes(x = as.factor(stack.Stratum), y = values)) +
+#   geom_boxplot(aes(fill = ind )) + theme_bw()
 ```
 
 ```{r}
-data_sf$predictions = c(data$prediction)
-tm_shape(data_sf) + tm_dots(col = "predictions")
+# randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata[rownames(fehlerdf),])
+# oob = predict(randomForest)
+# inb = predict(randomForest, newdata = predictors[rownames(fehlerdf),]) 
+# 
+# var(yobs = fehlerdf$Bodenfeuchte_Prozent, ymod = oob)
+# var(yobs = fehlerdf$Bodenfeuchte_Prozent, ymod = inb)
+# 
+# 
+# {
+# plot(x = fehlerdf$Bodenfeuchte_Prozent, y = oob)
+# points(x = fehlerdf$Bodenfeuchte_Prozent, y = inb, col = "red")
+# }
+# 
+# # Variableneinfluss
+# variableneinfluss = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata[rownames(fehlerdf),], importance = TRUE)
+# varImpPlot(variableneinfluss, type = "1")
 ```
-
