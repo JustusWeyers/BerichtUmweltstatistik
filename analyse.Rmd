@@ -165,7 +165,7 @@ data = data %>%
 ## Einfaches lineares Modell
 
 ```{r}
-#ä Modellerstellung
+# Modellerstellung
 linModel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
 # Vorhersage und Fehler speichern
 data = pred(name = "linModel", model = linModel, predictors = predictors, 
@@ -180,7 +180,7 @@ vif(linModel)
 ## Bestes lineares Modell
 
 ```{r}
-# Mögliche liineare Modelle nach Güte untersuchen und ordnen
+# Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 # AICs
 plot(res)
@@ -198,6 +198,7 @@ plot(bestlinModel)
 data = pred(name = "bestlinModel", model = bestlinModel, 
             predictors = predictors, data = data, 
             response = response)
+var(yobs = data[!is.na(data$bestlinModel), response], ymod = na.omit(data$bestlinModel))
 # RMSE
 rmse(actual = data[!is.na(data$bestlinModel), response], 
      predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
