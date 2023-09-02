@@ -2,10 +2,15 @@
 title: "Umweltstatistik Bericht - R"
 author: "Milena Mensching und Justus Weyers"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  html_document:
+    toc: true
+    toc_float: true
 ---
 
-# Pakete laden
+# Technisches
+
+## Pakete laden
 
 ```{r, warning=FALSE, message=FALSE}
 # Das Tidyverse
@@ -33,7 +38,7 @@ library(randomForest)
 library(quantregForest)
 ```
 
-# Einstellungen
+## Einstellungen
 
 ```{r, warning = FALSE, message=FALSE}
 # Seed festlegen
@@ -42,24 +47,32 @@ set.seed(1)
 tmap::tmap_mode("view")
 ```
 
-# Funktionsdefinitionen
+## Funktionsdefinitionen
 
 ```{r}
 # Funktion, um Modellvorhersage und Fehler an 
 # den zentralen Dataframe 'data' anzubinden
-pred = function(name, model, predictors, data, response) {
-  # Vorhersagewerte bestimmen
-  predictions = predict(model, newdata = predictors)
-  # Eigentliche Werte 
-  actual = data[rownames(predictors),response]
-  
-  # Vorhersage anbinden
+pred = function(name, model, predictors = NA, data, response, 
+                predictions = NULL) {
+  # Vorhersagespalte anlegen
   data[,name] = rep(NA, nrow(data))
-  data[rownames(predictors),name] = predictions
-  
-  # Fehler anbinden
+  # Fehlerspalte anlegen
   data[,paste0("err", name)] = rep(NA, nrow(data))
-  data[rownames(predictors),paste0("err", name)] = (predictions - actual)**2
+    
+  if (!is.null(predictions)) {
+    data[as.double(names(predictions)),name] = predictions
+  } else {
+    # Vorhersagewerte bestimmen
+    predictions = predict(model, newdata = predictors)
+    
+    # Vorhersage anbinden
+    data[rownames(predictors),name] = predictions
+  }
+  
+  # Eigentliche Werte 
+  actual = data[!is.na(data[,name]), response]
+  # Fehler anbinden
+  data[!is.na(data[,name]),paste0("err", name)] = (predictions - actual)**2
   
   return(data)
 }
@@ -81,7 +94,7 @@ sf = function(df) {
 }
 ```
 
-# Daten einlesen
+## Daten einlesen
 
 ```{r}
 # Inputdatei
@@ -119,6 +132,20 @@ predictors = modeldata |>
 
 # Kartenansicht der Daten
 tm_shape(sf(data)) + tm_dots(col = response)
+```
+
+## Dataframe bearbeiten
+
+Hier sind ein paar unabhängige Änderungen am Dataframe 'data' platziert.
+
+```{r}
+# Neue Spalte anlegen mit Namen der Straten
+data = data %>%
+  mutate(StratumName = case_when(
+    Stratum == 1 ~ "Talsand",
+    Stratum == 2 ~ "Übergang",
+    Stratum == 3 ~ "Feuchtwiese"
+    ))
 ```
 
 # Datenexploration
@@ -179,16 +206,18 @@ rmse(actual = data[!is.na(data$bestlinModel), response],
 ## Plots Lineare Modelle
 
 ```{r}
-ggplot(data, aes(x = Bodenfeuchte_Prozent, y = linModel)) +
-  geom_point(aes(col = as.factor(Stratum)))
+ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel)) +
+  geom_point(aes(col = StratumName))
 
-ggplot(data, aes(x = as.factor(Stratum), y = errlinModel, fill = as.factor(Stratum))) +
-  geom_boxplot()
+ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
+  geom_boxplot(aes(fill = StratumName))
 
-tm_shape(sf(data)) + tm_dots(col = "linModel")
+tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
 ```
 
-# Baum
+# Baumbasierte Modelle
+
+## CART
 
 ```{r}
 # Baum erstellen
@@ -200,29 +229,55 @@ data = pred(name = "treeModel", model = treeModel,
 # Baumplot
 {plot(treeModel);text(treeModel)}
 ```
-# Baustelle
+
+## Random Forest
 
 ```{r}
-# stack = na.omit(stack(data, select=c("errlinModel", "errbestlinModel", "errtreeModel")))
-# ggplot(stack, aes(x = as.factor(stack.Stratum), y = values)) +
-#   geom_boxplot(aes(fill = ind )) + theme_bw()
+# Wald anlegen
+randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata)
+
+# OOB-INB Geschichte
+oob = predict(randomForest)
+data = pred(name = "OOB", predictions = oob, data = data, response = response)
+
+inb = predict(randomForest, newdata = predictors)
+data = pred(name = "INB", predictions = inb, data = data, response = response)
+
+var(yobs = data[!is.na(data$OOB), response], ymod = na.omit(data$OOB))
+var(yobs = data[!is.na(data$INB), response], ymod = na.omit(data$INB))
+
+data |> 
+  # Dataframe umgestalten. Spalte mit OOB/INB hinzufügen.
+  pivot_longer(cols=c("OOB", "INB"), names_to='Vorhersagetyp', 
+               values_to='Prediction') |>
+  # Zeilen ohne vorhersagewerte löschen
+  drop_na(Prediction) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = Prediction, col = Vorhersagetyp)) +
+  geom_point() +
+  scale_color_manual(values = c("palegreen4", "palegreen2")) +
+  theme_bw()
+
+# Variableneinfluss
+importance = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata, 
+                          importance = TRUE)
+varImpPlot(importance, type = "1")
 ```
 
+# Diskussion
+
+## Vergleich Fehler 
+
+Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
+
 ```{r}
-# randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata[rownames(fehlerdf),])
-# oob = predict(randomForest)
-# inb = predict(randomForest, newdata = predictors[rownames(fehlerdf),]) 
-# 
-# var(yobs = fehlerdf$Bodenfeuchte_Prozent, ymod = oob)
-# var(yobs = fehlerdf$Bodenfeuchte_Prozent, ymod = inb)
-# 
-# 
-# {
-# plot(x = fehlerdf$Bodenfeuchte_Prozent, y = oob)
-# points(x = fehlerdf$Bodenfeuchte_Prozent, y = inb, col = "red")
-# }
-# 
-# # Variableneinfluss
-# variableneinfluss = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata[rownames(fehlerdf),], importance = TRUE)
-# varImpPlot(variableneinfluss, type = "1")
+data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", "errOOB", "errINB"), 
+               names_to='Modeltype', values_to='SquaredError') |>
+  # Entfernen von Zeilen mit NAs in der Error-Spalte
+  drop_na(SquaredError) |>
+  # ggplot
+  ggplot(aes(x = StratumName, y = SquaredError, fill = Modeltype)) + 
+  geom_boxplot() + theme_bw()
 ```
