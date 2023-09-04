@@ -33,6 +33,8 @@ library(car) # vif
 library(visreg)
 
 # Baumbasierte Modelle
+#install.packages("tree")
+#install.packages("quantregForest")
 library(tree)
 library(randomForest)
 library(quantregForest)
@@ -192,7 +194,7 @@ plot(res, type = "s")
 bestlinModel = res@objects[[1]]
 summary(bestlinModel)
 plot(bestlinModel)
-# visreg(bestModel) #?!
+#visreg(bestlinModel) #?!
 
 # Vorhersage und Fehler speichern
 data = pred(name = "bestlinModel", model = bestlinModel, 
@@ -207,11 +209,28 @@ rmse(actual = data[!is.na(data$bestlinModel), response],
 ## Plots Lineare Modelle
 
 ```{r}
-ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel)) +
-  geom_point(aes(col = StratumName))
+# Einfaches lineares Model
+ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
+  geom_point(aes(col = StratumName))+
+  labs(title = "Abweichung von vorhergesagten und gemessenen Werten", subtitle = "Einfaches lineares Modell" ,x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
 
 ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
-  geom_boxplot(aes(fill = StratumName))
+  geom_boxplot(aes(fill = StratumName)) +
+  labs(x = "", y = "Fehlerquadratsumme (evtl fehlt Wurzel)")+
+   theme(legend.position="none")
+
+# Bestes lineares Model
+ggplot(data |> drop_na(bestlinModel), aes(x = Bodenfeuchte_Prozent, y = bestlinModel))+
+  geom_point(aes(col = StratumName))+
+  labs(title = "Abweichung von vorhergesagten und gemessenen Werten", subtitle = "Bestes lineares Modell" ,x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
+
+ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinModel)) +
+  geom_boxplot(aes(fill = StratumName)) +
+  labs(x = "", y = "Fehlerquadratsumme (evtl fehlt Wurzel)")+
+   theme(legend.position="none")
+  
 
 tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
 ```
