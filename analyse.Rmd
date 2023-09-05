@@ -74,7 +74,7 @@ pred = function(name, model, predictors = NA, data, response,
   # Eigentliche Werte 
   actual = data[!is.na(data[,name]), response]
   # Fehler anbinden
-  data[!is.na(data[,name]),paste0("err", name)] = (predictions - actual)**2
+  data[!is.na(data[,name]),paste0("err", name)] = sqrt((predictions - actual)**2)
   
   return(data)
 }
@@ -177,6 +177,20 @@ rmse(actual = data[!is.na(data$linModel), response],
      predicted = data[!is.na(data$linModel), "linModel"])
 # VIF
 vif(linModel)
+#barplot(vif(linModel), main="VIF", names.arg= "", horiz = T, las= 1, cex.names = 0.7)
+#text(1.85, 5.5, "Geländehöhe (1,90)", pos = 4)
+#text(1.45, 3,"Mächtigkeit_A_Horizont (1,50)", pos = 4)
+#text(3,2, "Mächtigkeit_Ox.Horizont (3,00)", pos = 4)
+#text("Mächtigkeit_AL_Horizont (1,72)")
+#text("Tiefe zum Ox.Horizont (2,68")
+
+
+out <- barplot(vif(linModel), main="", names.arg="")
+text(out, rep(-.1, 6), c("Tiefe zum Ox.horizont", "Mächtigkeit Ox.horizont", "Mächtigkeit_A", "Mächtigkeit_AL", "Geländehöhe"), srt=45, pos=2, xpd=NA, cex=.75)
+text(x = out, y= vif(linModel), 
+     label = paste(round(vif(linModel),3)),
+     pos = 1, cex = 0.8, col = "red")
+
 ```
 
 ## Bestes lineares Modell
@@ -212,23 +226,23 @@ rmse(actual = data[!is.na(data$bestlinModel), response],
 # Einfaches lineares Model
 ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
   geom_point(aes(col = StratumName))+
-  labs(title = "Abweichung von vorhergesagten und gemessenen Werten", subtitle = "Einfaches lineares Modell" ,x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
+  labs(x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
   geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
 
 ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
   geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Fehlerquadratsumme (evtl fehlt Wurzel)")+
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme")+
    theme(legend.position="none")
 
 # Bestes lineares Model
 ggplot(data |> drop_na(bestlinModel), aes(x = Bodenfeuchte_Prozent, y = bestlinModel))+
   geom_point(aes(col = StratumName))+
-  labs(title = "Abweichung von vorhergesagten und gemessenen Werten", subtitle = "Bestes lineares Modell" ,x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
+  labs(x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
   geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
 
 ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinModel)) +
   geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Fehlerquadratsumme (evtl fehlt Wurzel)")+
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme")+
    theme(legend.position="none")
   
 
@@ -294,10 +308,29 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", "errOOB", "errINB"), 
-               names_to='Modeltype', values_to='SquaredError') |>
+               names_to='Modeltype', values_to='RootsquaredError') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
-  drop_na(SquaredError) |>
+  drop_na(RootsquaredError) |>
   # ggplot
-  ggplot(aes(x = StratumName, y = SquaredError, fill = Modeltype)) + 
-  geom_boxplot() + theme_bw()
+  ggplot(aes(x = StratumName, y = RootsquaredError, fill = Modeltype)) + 
+  geom_boxplot() + theme_bw()+
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp")+
+   scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB", "Einfaches lineares Modell", "RF-OOB", "CART"))
+```
+
+Vergleich der Abweichung von der Diagonalen
+```{r}
+data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c("linModel", "bestlinModel", "treeModel", "OOB", "INB"), 
+               names_to='Modeltype', values_to='predictions') |>
+  # Entfernen von Zeilen mit NAs in der Error-Spalte
+  drop_na(predictions) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
+  geom_line(aes(color = Modeltype)) + theme_bw()+
+  labs(x = "Messwerte", y = "Vorhersage") +
+  scale_color_discrete(name = "Modelltyp", breaks = c("bestlinModel", "INB", "linModel", "OOB", "treeModel"), labels=c("Bestes lineares Modell", "RF-INB", "Einfaches lineares Modell", "RF-OOB", "CART"))+
+  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x")
+
 ```
