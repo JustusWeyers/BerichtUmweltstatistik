@@ -21,7 +21,6 @@ library(GGally)
 library(corrplot)
 library(patchwork)
 
-
 # Statistik
 library(Metrics)
 
@@ -35,8 +34,6 @@ library(car) # vif
 library(visreg)
 
 # Baumbasierte Modelle
-#install.packages("tree")
-#install.packages("quantregForest")
 library(tree)
 library(randomForest)
 library(quantregForest)
@@ -76,7 +73,7 @@ pred = function(name, model, predictors = NA, data, response,
   # Eigentliche Werte 
   actual = data[!is.na(data[,name]), response]
   # Fehler anbinden
-  data[!is.na(data[,name]),paste0("err", name)] = sqrt((predictions - actual)**2)
+  data[!is.na(data[,name]),paste0("err", name)] = sqrt((predictions-actual)**2)
   
   return(data)
 }
@@ -98,36 +95,50 @@ sf = function(df) {
 }
 ```
 
-## Daten einlesen
+## Konstanten
 
 ```{r}
 # Inputdatei
-path = "Data/data.txt"
+inputdata = "Data/data.txt"
 
 # Response-Variable
 response = "Bodenfeuchte_Prozent"
+# Name der Response-Variable
+responseName = "Bodenfeuchte [%]"
 
+# Prädiktoren
+predicts = c(
+  "Tiefe_zum_Oxidationshorizont_cm",
+  "Maechtigkeit_Oxidationshorizont_cm",
+  "Maechtigkeit_A_Horizont_cm",
+  "Maechtigkeit_AL_Schicht_cm",
+  "Gelaendehoehe_m",
+  "Bodenfeuchte_Prozent"
+  )
+# Namen der Prädiktoren
+predictsNames = c(
+  "Tiefe zum Oxidationshorizont [cm]",
+  "Mächtigkeit Oxidationshorizont [cm]",
+  "Mächtigkeit A-Horizont [cm]",
+  "Mächtigkeit AL-Schicht [cm]",
+  "Geländehöhe [m]"
+  )
+```
+
+## Daten einlesen
+
+```{r}
 # Alles Einlesen
-readin = read.table(path, header = TRUE)
+readin = read.table(inputdata, header = TRUE)
 
 # Variablen von Interesse auswählen
 data = readin |> 
-  select(Punkt, Jahr, Stratum, x_UTM, y_UTM,
-         Tiefe_zum_Oxidationshorizont_cm, 
-         Maechtigkeit_Oxidationshorizont_cm, 
-         Maechtigkeit_A_Horizont_cm,
-         Maechtigkeit_AL_Schicht_cm,
-         Gelaendehoehe_m,
-         Bodenfeuchte_Prozent)
+  select(all_of(c("Punkt", "Jahr", "Stratum", "x_UTM", "y_UTM", 
+                  predicts, response)))
 
 # Modelldaten selektieren
 modeldata =  data |> 
-  select(Tiefe_zum_Oxidationshorizont_cm,
-         Maechtigkeit_Oxidationshorizont_cm, 
-         Maechtigkeit_A_Horizont_cm,
-         Maechtigkeit_AL_Schicht_cm,
-         Gelaendehoehe_m,
-         Bodenfeuchte_Prozent) |> 
+  select(all_of(c(predicts, response))) |> 
   na.omit()
 
 # Prädiktoren selektieren
@@ -184,31 +195,35 @@ results = aov(errlinModel ~ StratumName, data=data)
 summary(results) #P-value: 0.751 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
 
 # VIF
-vif(linModel)
-#barplot(vif(linModel), main="VIF", names.arg= "", horiz = T, las= 1, cex.names = 0.7)
-#text(1.85, 5.5, "Geländehöhe (1,90)", pos = 4)
-#text(1.45, 3,"Mächtigkeit_A_Horizont (1,50)", pos = 4)
-#text(3,2, "Mächtigkeit_Ox.Horizont (3,00)", pos = 4)
-#text("Mächtigkeit_AL_Horizont (1,72)")
-#text("Tiefe zum Ox.Horizont (2,68")
-
-
+{
 out <- barplot(vif(linModel), main="", names.arg="")
 text(out, rep(-.1, 6), c("Tiefe zum Ox.horizont", "Mächtigkeit Ox.horizont", "Mächtigkeit_A", "Mächtigkeit_AL", "Geländehöhe"), srt=45, pos=2, xpd=NA, cex=.75)
 text(x = out, y= vif(linModel), 
      label = paste(round(vif(linModel),3)),
      pos = 1, cex = 0.8, col = "red")
+}
+# Alternativer VIF-Plot mit ggplot()
+vifdf = data.frame(vif = vif(linModel), predictors = predictsNames)
+vifdf |>
+  ggplot(aes(x = predictors, y = vif)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = format(round(vif, 2))), vjust = -0.3, size = 3.5)+
+  labs(x = "Prädiktoren", y = "VIF")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  theme_bw()
 
+# Barplot zur Cooks-Distance
 barplot(cooks.distance(linModel), cex.names = 0.7, ylim = c(0, 0.4))
+
+# AIC-Wert für das lineare Modell
 AIC(linModel)
 
-
-p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", gg= T, ylab= "")
-p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", gg = T, ylab = "")
-p3 <- visreg(linModel, xvar = "Maechtigkeit_Oxidationshorizont_cm",gg = T, ylab= "Bodenfeuchte[%]")
-p4 <- visreg(linModel, xvar = "Maechtigkeit_A_Horizont_cm", gg = T, ylab = "")
-p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = T, ylab="")
-
+# Regressionsgeraden
+p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", gg= TRUE, ylab= "")
+p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", gg = TRUE, ylab = "")
+p3 <- visreg(linModel, xvar = "Maechtigkeit_Oxidationshorizont_cm",gg = TRUE, ylab= "Bodenfeuchte[%]")
+p4 <- visreg(linModel, xvar = "Maechtigkeit_A_Horizont_cm", gg = TRUE, ylab = "")
+p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = TRUE, ylab="")
 (p1+p2)/(p3+p4)/(p5+ plot_spacer())
 ```
 
@@ -218,31 +233,29 @@ p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = T, ylab="")
 # Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 
-res1 = glmulti(linModel, level = 1, method = "h", confsetsize = 1, crit = "AIC")
-# AICs
+# AICs der ersten 8 Modelle
 plot(res)
 mean(res@crits)
-
 
 # Wichtigkeit von Prädiktoren
 plot(res, type = "s")
 
-# Das beste Modell
+# Das beste Modell extrahieren
 bestlinModel = res@objects[[1]]
+# Beschreibung des besten Modells
 summary(bestlinModel)
+# Defaut Plots 
 plot(bestlinModel)
-res1@crits #AIC
-
-#linModelattempt= lm(Bodenfeuchte_Prozent ~ Gelaendehoehe_m + #Tiefe_zum_Oxidationshorizont_cm, data = modeldata)
-#summary(linModelattempt)
-#visreg(linModelattempt) SO geht es, das Modell darzustellen, aber andddererseites sind die gleichen Abbildungen ja logischerweise auch in den Visualisierungen des einfachen linearen Modells
-
+# AIC des besten linearen Modells
+res@crits[1]
 
 # Vorhersage und Fehler speichern
 data = pred(name = "bestlinModel", model = bestlinModel, 
             predictors = predictors, data = data, 
             response = response)
-var(yobs = data[!is.na(data$bestlinModel), response], ymod = na.omit(data$bestlinModel))
+# Varianz
+var(yobs = data[!is.na(data$bestlinModel), response], 
+    ymod = na.omit(data$bestlinModel))
 # RMSE
 rmse(actual = data[!is.na(data$bestlinModel), response], 
      predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
@@ -251,27 +264,33 @@ rmse(actual = data[!is.na(data$bestlinModel), response],
 ## Plots Lineare Modelle
 
 ```{r}
-# Einfaches lineares Model
+# Vorhersage Einfaches lineares Model
 ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
   geom_point(aes(col = StratumName))+
-  labs(x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
+  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
+  theme_bw()
 
+# Fehler ~ Stratum
 ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
   geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Wurzel aus Fehlerquadratsumme")+
-   theme(legend.position="none")
+  labs(x = "", y = "Wurzel aus Fehlerquadraten")+
+  theme(legend.position="none") +
+  theme_bw()
 
-# Bestes lineares Model
+# Vorhersage bestes lineares Model
 ggplot(data |> drop_na(bestlinModel), aes(x = Bodenfeuchte_Prozent, y = bestlinModel))+
   geom_point(aes(col = StratumName))+
-  labs(x = "Messwerte", y = "Vorhersage", caption = "Bodenfeuchte [%]", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x")
+  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
+  theme_bw()
 
+# Fehler ~ Stratum
 ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinModel)) +
   geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Wurzel aus Fehlerquadratsumme")+
-   theme(legend.position="none")
+  labs(x = "", y = "Wurzel aus Fehlerquadraten")+
+  theme(legend.position="none") +
+  theme_bw()
   
 
 tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
@@ -335,18 +354,25 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", "errOOB", "errINB"), 
+  pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", 
+                      "errOOB", "errINB"), 
                names_to='Modeltype', values_to='RootsquaredError') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(RootsquaredError) |>
   # ggplot
   ggplot(aes(x = StratumName, y = RootsquaredError, fill = Modeltype)) + 
-  geom_boxplot() + theme_bw()+
-  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp")+
-   scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB", "Einfaches lineares Modell", "RF-OOB", "CART"))
+  # Plot-Elemente
+  geom_boxplot() + 
+  # Beschriftung
+  scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB", 
+                               "Einfaches lineares Modell", "RF-OOB", "CART")) +
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
+  # Theme
+  theme_bw()
 ```
 
 Vergleich der Abweichung von der Diagonalen
+
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
@@ -356,10 +382,29 @@ data |>
   drop_na(predictions) |>
   # ggplot
   ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
-  geom_line(aes(color = Modeltype)) + theme_bw()+
+  # Plot Elemente
+  geom_point(aes(color = Modeltype)) + 
+  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
+  # Beschriftung
   labs(x = "Messwerte", y = "Vorhersage") +
-  scale_color_discrete(name = "Modelltyp", breaks = c("bestlinModel", "INB", "linModel", "OOB", "treeModel"), labels=c("Bestes lineares Modell", "RF-INB", "Einfaches lineares Modell", "RF-OOB", "CART"))+
-  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x")
+  scale_color_discrete(name = "Modelltyp", 
+                       breaks = c("bestlinModel", "INB", "linModel", 
+                                  "OOB", "treeModel"), 
+                       labels = c("Bestes lineares Modell", "RF-INB", 
+                                  "Einfaches lineares Modell", "RF-OOB", 
+                                  "CART")) +
+  # Theme
+  theme_bw()
 
 
 ```
+
+# Finale
+
+```{r, warning=FALSE}
+# Abspeichern des data-Dataframes als csv-Datei
+write.csv(data, file.path("Data", "DATA.csv"))
+# Abspeichern des data-DAtaframes als shape-Datei
+write_sf(sf(data), file.path("shapefiles", "points.shp"), delete_layer = TRUE)
+```
+
