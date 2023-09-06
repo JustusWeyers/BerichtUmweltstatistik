@@ -19,6 +19,8 @@ library(tidyverse)
 # Plots
 library(GGally)
 library(corrplot)
+library(patchwork)
+
 
 # Statistik
 library(Metrics)
@@ -175,6 +177,12 @@ data = pred(name = "linModel", model = linModel, predictors = predictors,
 # RMSE
 rmse(actual = data[!is.na(data$linModel), response], 
      predicted = data[!is.na(data$linModel), "linModel"])
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errlinModel~ data$StratumName) #p-value = 0.8407, Varianzen gleich
+results = aov(errlinModel ~ StratumName, data=data)
+summary(results) #P-value: 0.751 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+
 # VIF
 vif(linModel)
 #barplot(vif(linModel), main="VIF", names.arg= "", horiz = T, las= 1, cex.names = 0.7)
@@ -191,6 +199,17 @@ text(x = out, y= vif(linModel),
      label = paste(round(vif(linModel),3)),
      pos = 1, cex = 0.8, col = "red")
 
+barplot(cooks.distance(linModel), cex.names = 0.7, ylim = c(0, 0.4))
+AIC(linModel)
+
+
+p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", gg= T, ylab= "")
+p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", gg = T, ylab = "")
+p3 <- visreg(linModel, xvar = "Maechtigkeit_Oxidationshorizont_cm",gg = T, ylab= "Bodenfeuchte[%]")
+p4 <- visreg(linModel, xvar = "Maechtigkeit_A_Horizont_cm", gg = T, ylab = "")
+p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = T, ylab="")
+
+(p1+p2)/(p3+p4)/(p5+ plot_spacer())
 ```
 
 ## Bestes lineares Modell
@@ -198,9 +217,13 @@ text(x = out, y= vif(linModel),
 ```{r}
 # Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+
+res1 = glmulti(linModel, level = 1, method = "h", confsetsize = 1, crit = "AIC")
 # AICs
 plot(res)
 mean(res@crits)
+
+
 # Wichtigkeit von Prädiktoren
 plot(res, type = "s")
 
@@ -208,7 +231,12 @@ plot(res, type = "s")
 bestlinModel = res@objects[[1]]
 summary(bestlinModel)
 plot(bestlinModel)
-#visreg(bestlinModel) #?!
+res1@crits #AIC
+
+#linModelattempt= lm(Bodenfeuchte_Prozent ~ Gelaendehoehe_m + #Tiefe_zum_Oxidationshorizont_cm, data = modeldata)
+#summary(linModelattempt)
+#visreg(linModelattempt) SO geht es, das Modell darzustellen, aber andddererseites sind die gleichen Abbildungen ja logischerweise auch in den Visualisierungen des einfachen linearen Modells
+
 
 # Vorhersage und Fehler speichern
 data = pred(name = "bestlinModel", model = bestlinModel, 
@@ -332,5 +360,6 @@ data |>
   labs(x = "Messwerte", y = "Vorhersage") +
   scale_color_discrete(name = "Modelltyp", breaks = c("bestlinModel", "INB", "linModel", "OOB", "treeModel"), labels=c("Bestes lineares Modell", "RF-INB", "Einfaches lineares Modell", "RF-OOB", "CART"))+
   geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x")
+
 
 ```
