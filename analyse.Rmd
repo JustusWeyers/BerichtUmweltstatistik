@@ -200,6 +200,8 @@ shapiro|>
 ```{r}
 # Modellerstellung
 linModel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
+
+summary(linModel)
 # Vorhersage und Fehler speichern
 data = pred(name = "linModel", model = linModel, predictors = predictors, 
             data = data, response = response)
@@ -231,9 +233,17 @@ vifdf |>
   theme_bw()
 
 # Barplot zur Cooks-Distance
-barplot(cooks.distance(linModel), cex.names = 0.7, ylim = c(0, 0.4))
+plot(linModel, 4, main = "", xaxt = "n", ann = F)
+title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
+text(x= 40, y= 0.3,label = "max = 0,326", pos = 4, cex = 0.8)
+text(x= 40, y= 0.25,label = "mean = 0,023", pos = 4,cex = 0.8)
+text(x= 40, y= 0.2,label = "min = 6,00e-05", pos = 4, cex = 0.8)
 
-# AIC-Wert für das lineare Modell
+max(cooks.distance(linModel)) #0.3255527
+min(cooks.distance(linModel)) #6.002479e-05
+mean(cooks.distance(linModel)) #0.02328232
+
+# Model-Wert für das lineare Modell
 AIC(linModel)
 
 # Regressionsgeraden
@@ -256,7 +266,56 @@ plot(res)
 mean(res@crits)
 
 # Wichtigkeit von Prädiktoren
-plot(res, type = "s")
+plot.glmulti<-function(x, type="p", ...) 
+{
+	if ( type == "p") {
+		plot(x@crits,xlab="Best models",
+				ylab=paste("Support (",x@params$crit,")"),pch=19, main="IC profile", ...)
+		
+		abline(h=x@crits[1]+2,col="red")
+	} else if (type == "w") {
+		ww = exp(-(x@crits - x@crits[1])/2)
+		ww=ww/sum(ww)
+		plot(ww,xlab="Best models",
+				ylab=paste("Evidence weight (",x@params$crit,")"),pch=19, main="Profile of model weights", ...)
+		cucu=function(i) sum(ww[1:i])
+		wwc=lapply(1:length(ww),cucu)
+		abline(v=min(which(wwc>=0.95)),col="red")
+	} else if (type=="r") {
+		if (length(x@objects)) {
+		# shows some diagnostics of the fit
+		dev.new()
+		par(mfrow=c(2,min(length(x@crits), 5)))
+		for (k in 1:min(length(x@crits), 5)) 
+			plot(x@objects[[k]],which=c(1), main=deparse(x@formulas[[k]]),...)
+		for (k in 1:min(length(x@crits), 5)) 
+			plot(x@objects[[k]],which=c(2),...)
+		} else warning("Unavailable: use includeobjects=T when calling glmulti.")		
+	} else if (type=="s") {
+		# plots variable (i.e. terms) importances
+		ww = exp(-(x@crits - x@crits[1])/2)
+		ww=ww/sum(ww)
+		# handle synonymies for interactions
+		# this translates to unique notations (e.g. x:y and y:x are the same)
+		clartou=function(x) {
+			sort(strsplit(x, ":")[[1]])-> pieces
+			if (length(pieces)>1) paste(pieces[1],":",pieces[2],sep="")
+			else x
+			}
+		# list terms in models
+		tet = lapply(x@formulas, function(x) sapply(attr(delete.response(terms(x)),"term.labels"), clartou))
+		# all unique terms
+		unique(unlist(tet))-> allt
+		# importances
+		sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)]))-> imp
+		# draw
+		par(oma=c(0,3,0,0))
+		barplot(sort(imp),xlab="",xlim=c(0,1), ylab="",horiz=T,las=2, names.arg= c("Tiefe_zum_Ox.horizont", "Mächtigkeit_Ox.horizont", "Mächtigkeit_A", "Mächtigkeit_AL", "Geländehöhe"),main="Model-averaged importance of terms", ...)
+		abline(v=0.8, col="red")
+	} else	warning("plot: Invalid type argument for plotting glmulti objects.")
+}
+
+plot.glmulti(res, type = "s", cex.names = 0.7)
 
 # Das beste Modell extrahieren
 bestlinModel = res@objects[[1]]
@@ -277,6 +336,24 @@ var(yobs = data[!is.na(data$bestlinModel), response],
 # RMSE
 rmse(actual = data[!is.na(data$bestlinModel), response], 
      predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
+
+#Cooks Distance
+
+plot(bestlinModel, 4, main = "", xaxt = "n", ann = F)
+title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
+text(x= 40, y= 0.2,label = "max = 0,199", pos = 4, cex = 0.8)
+text(x= 40, y= 0.18,label = "mean = 0,022", pos = 4,cex = 0.8)
+text(x= 40, y= 0.16,label = "min = 5,37e-05", pos = 4, cex = 0.8)
+
+max(cooks.distance(bestlinModel)) #0.1993562
+min(cooks.distance(bestlinModel)) #5.374797e-06
+mean(cooks.distance(bestlinModel)) #0.02204445
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errbestlinModel~ data$StratumName) #p-value = 0.9685, Varianzen gleich
+results = aov(errbestlinModel ~ StratumName, data=data)
+summary(results) #P-value: 0.55 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+
 ```
 
 ## Plots Lineare Modelle
