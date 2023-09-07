@@ -23,6 +23,7 @@ library(patchwork)
 
 # Statistik
 library(Metrics)
+library(rstatix)
 
 # Geo-Pakete
 library(sf)
@@ -37,6 +38,9 @@ library(visreg)
 library(tree)
 library(randomForest)
 library(quantregForest)
+
+# LaTex
+library(xtable)
 ```
 
 ## Einstellungen
@@ -93,13 +97,25 @@ var = function(yobs, ymod) {
 sf = function(df) {
   st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
 }
+
+# Funktion um Grafiken als svg-Datei zu exportieren
+svgExport = function(plot, name){
+  # Eventuell Dateiendung anhängen
+  if (!endsWith(".svg", name)) name = paste0(name, ".svg")
+  # Export
+  svg(name, height=8,width=8)
+  plot
+  dev.off()
+}
 ```
 
 ## Konstanten
 
 ```{r}
 # Inputdatei
-inputdata = "Data/data.txt"
+inputdata = "data/data.txt"
+# Abbildungsordner
+imgpath = "images/"
 
 # Response-Variable
 response = "Bodenfeuchte_Prozent"
@@ -112,8 +128,7 @@ predicts = c(
   "Maechtigkeit_Oxidationshorizont_cm",
   "Maechtigkeit_A_Horizont_cm",
   "Maechtigkeit_AL_Schicht_cm",
-  "Gelaendehoehe_m",
-  "Bodenfeuchte_Prozent"
+  "Gelaendehoehe_m"
   )
 # Namen der Prädiktoren
 predictsNames = c(
@@ -136,24 +151,6 @@ data = readin |>
   select(all_of(c("Punkt", "Jahr", "Stratum", "x_UTM", "y_UTM", 
                   predicts, response)))
 
-# Modelldaten selektieren
-modeldata =  data |> 
-  select(all_of(c(predicts, response))) |> 
-  na.omit()
-
-# Prädiktoren selektieren
-predictors = modeldata |> 
-  select(-one_of(response))
-
-# Kartenansicht der Daten
-tm_shape(sf(data)) + tm_dots(col = response)
-```
-
-## Dataframe bearbeiten
-
-Hier sind ein paar unabhängige Änderungen am Dataframe 'data' platziert.
-
-```{r}
 # Neue Spalte anlegen mit Namen der Straten
 data = data %>%
   mutate(StratumName = case_when(
@@ -163,16 +160,44 @@ data = data %>%
     ))
 ```
 
+## Modelldaten selektieren
+
+```{r}
+modeldata =  data |> 
+  select(all_of(c(predicts, response))) |> 
+  na.omit()
+
+# Prädiktoren selektieren
+predictors = modeldata |> 
+  select(-one_of(response))
+
+# Kartenansicht der Daten
+# tm_shape(sf(data)) + tm_dots(col = response)
+```
+
 # Datenexploration
 
 ```{r, warning = FALSE, message=FALSE}
 # Korrelationsmatrix
-# ggpairs(modeldata)
+corplot = ggpairs(modeldata, columnLabels = str_wrap(c(predictsNames, responseName), width = 10), las = 2) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme_bw()
+# Export
+svgExport(plot = corplot, name = file.path(imgpath, "corplot"))
 
-# Alternativ:
-# cor_model = cor(modeldata, use = "pairwise.complete.obs")
-# p_values = cor.mtest(modeldata, conf.level = 0.95)
-# corrplot(cor_model, p.mat = p_values$p, insig = 'p-value', sig.level = -1)
+# Test auf Normalverteiltheit
+shapiro = modeldata |>
+  # Shapiro-Wilk Test auf Normalverteiltheit
+  shapiro_test(vars = c(predicts, response)) |>
+  # Spalte anlegen: Normalverteilt Ja/Nein
+  mutate(normal = p>0.05) |>
+  # Umbenennung der rownames
+  mutate(names = rev(c(predictsNames, responseName))) |>
+  column_to_rownames('names') |>
+  select(-variable)
+# Ausgabe von 'shapiro' als LaTex-Tabelle
+shapiro|>
+  xtable()
 ```
 
 # Lineare Modelle
