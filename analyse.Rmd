@@ -97,16 +97,6 @@ var = function(yobs, ymod) {
 sf = function(df) {
   st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
 }
-
-# Funktion um Grafiken als svg-Datei zu exportieren
-svgExport = function(plot, name){
-  # Eventuell Dateiendung anhängen
-  if (!endsWith(".svg", name)) name = paste0(name, ".svg")
-  # Export
-  svg(name, height=8,width=8)
-  plot
-  dev.off()
-}
 ```
 
 ## Konstanten
@@ -179,12 +169,15 @@ predictors = modeldata |>
 
 ```{r, warning = FALSE, message=FALSE}
 # Korrelationsmatrix
-corplot = ggpairs(modeldata, columnLabels = str_wrap(c(predictsNames, responseName), width = 10), las = 2) +
+corplot = ggpairs(modeldata, 
+                  columnLabels = str_wrap(c(predictsNames, responseName), width = 10)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme_bw()
-# Export
-svgExport(plot = corplot, name = file.path(imgpath, "corplot"))
-
+# Export als svg Datei
+svg(file.path(imgpath, "corplot.svg"), height=8,width=8)
+corplot
+dev.off()
+  
 # Test auf Normalverteiltheit
 shapiro = modeldata |>
   # Shapiro-Wilk Test auf Normalverteiltheit
