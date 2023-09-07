@@ -97,6 +97,30 @@ var = function(yobs, ymod) {
 sf = function(df) {
   st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
 }
+
+# Funktion um die Wichtigkeit von Prädiktoren 
+# in einem linearen Modell 'x' zu erhalten
+# Code: {glmulti} Vincent Calcagno, McGill University 
+# (modifiziert)
+getImportance = function(x) {
+  # plots variable (i.e. terms) importances
+	ww = exp(-(x@crits - x@crits[1])/2)
+	ww=ww/sum(ww)
+	# handle synonymies for interactions
+	# this translates to unique notations (e.g. x:y and y:x are the same)
+	clartou=function(x) {
+		sort(strsplit(x, ":")[[1]])-> pieces
+		if (length(pieces)>1) paste(pieces[1],":",pieces[2],sep="")
+		else x
+		}
+	# list terms in models
+	tet = lapply(x@formulas, function(x) sapply(attr(delete.response(terms(x)),"term.labels"), clartou))
+	# all unique terms
+	unique(unlist(tet))-> allt
+	# importances
+	sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)]))-> imp
+	return(imp)
+}
 ```
 
 ## Konstanten
@@ -174,9 +198,9 @@ corplot = ggpairs(modeldata,
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme_bw()
 # Export als svg Datei
-svg(file.path(imgpath, "corplot.svg"), height=8,width=8)
-corplot
-dev.off()
+# svg(file.path(imgpath, "corplot.svg"), height=8,width=8)
+# corplot
+# dev.off()
   
 # Test auf Normalverteiltheit
 shapiro = modeldata |>
@@ -188,9 +212,10 @@ shapiro = modeldata |>
   mutate(names = rev(c(predictsNames, responseName))) |>
   column_to_rownames('names') |>
   select(-variable)
+
 # Ausgabe von 'shapiro' als LaTex-Tabelle
-shapiro|>
-  xtable()
+# shapiro|>
+#   xtable()
 ```
 
 # Lineare Modelle
@@ -266,56 +291,13 @@ plot(res)
 mean(res@crits)
 
 # Wichtigkeit von Prädiktoren
-plot.glmulti<-function(x, type="p", ...) 
-{
-	if ( type == "p") {
-		plot(x@crits,xlab="Best models",
-				ylab=paste("Support (",x@params$crit,")"),pch=19, main="IC profile", ...)
-		
-		abline(h=x@crits[1]+2,col="red")
-	} else if (type == "w") {
-		ww = exp(-(x@crits - x@crits[1])/2)
-		ww=ww/sum(ww)
-		plot(ww,xlab="Best models",
-				ylab=paste("Evidence weight (",x@params$crit,")"),pch=19, main="Profile of model weights", ...)
-		cucu=function(i) sum(ww[1:i])
-		wwc=lapply(1:length(ww),cucu)
-		abline(v=min(which(wwc>=0.95)),col="red")
-	} else if (type=="r") {
-		if (length(x@objects)) {
-		# shows some diagnostics of the fit
-		dev.new()
-		par(mfrow=c(2,min(length(x@crits), 5)))
-		for (k in 1:min(length(x@crits), 5)) 
-			plot(x@objects[[k]],which=c(1), main=deparse(x@formulas[[k]]),...)
-		for (k in 1:min(length(x@crits), 5)) 
-			plot(x@objects[[k]],which=c(2),...)
-		} else warning("Unavailable: use includeobjects=T when calling glmulti.")		
-	} else if (type=="s") {
-		# plots variable (i.e. terms) importances
-		ww = exp(-(x@crits - x@crits[1])/2)
-		ww=ww/sum(ww)
-		# handle synonymies for interactions
-		# this translates to unique notations (e.g. x:y and y:x are the same)
-		clartou=function(x) {
-			sort(strsplit(x, ":")[[1]])-> pieces
-			if (length(pieces)>1) paste(pieces[1],":",pieces[2],sep="")
-			else x
-			}
-		# list terms in models
-		tet = lapply(x@formulas, function(x) sapply(attr(delete.response(terms(x)),"term.labels"), clartou))
-		# all unique terms
-		unique(unlist(tet))-> allt
-		# importances
-		sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)]))-> imp
-		# draw
-		par(oma=c(0,3,0,0))
-		barplot(sort(imp),xlab="",xlim=c(0,1), ylab="",horiz=T,las=2, names.arg= c("Tiefe_zum_Ox.horizont", "Mächtigkeit_Ox.horizont", "Mächtigkeit_A", "Mächtigkeit_AL", "Geländehöhe"),main="Model-averaged importance of terms", ...)
-		abline(v=0.8, col="red")
-	} else	warning("plot: Invalid type argument for plotting glmulti objects.")
-}
-
-plot.glmulti(res, type = "s", cex.names = 0.7)
+imp = data.frame(importance = getImportance(res))
+imp |> 
+  ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
+  geom_bar(stat="identity") +
+  geom_vline(xintercept = 0.8, color = "red") +
+  labs(x = "", y = "") +
+  theme_bw()
 
 # Das beste Modell extrahieren
 bestlinModel = res@objects[[1]]
@@ -353,7 +335,6 @@ mean(cooks.distance(bestlinModel)) #0.02204445
 bartlett.test(data$errbestlinModel~ data$StratumName) #p-value = 0.9685, Varianzen gleich
 results = aov(errbestlinModel ~ StratumName, data=data)
 summary(results) #P-value: 0.55 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
-
 ```
 
 ## Plots Lineare Modelle
@@ -387,8 +368,7 @@ ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinMode
   theme(legend.position="none") +
   theme_bw()
   
-
-tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
+# tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
 ```
 
 # Baumbasierte Modelle
