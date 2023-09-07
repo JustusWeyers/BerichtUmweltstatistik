@@ -103,9 +103,9 @@ sf = function(df) {
 
 ```{r}
 # Inputdatei
-inputdata = "data/data.txt"
+inputdata = "Data/data.txt"
 # Abbildungsordner
-imgpath = "images/"
+imgpath = "Images/"
 
 # Response-Variable
 response = "Bodenfeuchte_Prozent"
