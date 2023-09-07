@@ -31,7 +31,7 @@ library(tmap)
 
 # Lineare Modelle
 library(glmulti)
-library(car) # vif
+library(car)
 library(visreg)
 
 # Baumbasierte Modelle
@@ -121,6 +121,17 @@ getImportance = function(x) {
 	sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)]))-> imp
 	return(imp)
 }
+
+# Funktionen um Daten mit Hilfe der 
+# Box-Cox-Transformation zu transformieren
+BCTransform <- function(y, lambda=0) {
+    if (lambda == 0L) { log(y) }
+    else { (y^lambda - 1) / lambda }
+}
+BCTransformInverse <- function(yt, lambda=0) {
+    if (lambda == 0L) { exp(yt) }
+    else { exp(log(1 + lambda * yt)/lambda) }
+}
 ```
 
 ## Konstanten
@@ -161,9 +172,9 @@ predictsNames = c(
 readin = read.table(inputdata, header = TRUE)
 
 # Variablen von Interesse auswählen
-data = readin |> 
+data = readin |>
   select(all_of(c("Punkt", "Jahr", "Stratum", "x_UTM", "y_UTM", 
-                  predicts, response)))
+                   predicts, response)))
 
 # Neue Spalte anlegen mit Namen der Straten
 data = data %>%
@@ -371,6 +382,39 @@ ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinMode
 # tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
 ```
 
+## GLM
+
+```{r}
+# Box-Cox-Transformation der Response-Variable
+bc = MASS::boxcox(linModel)
+lambda = bc$x[which.max(bc$y)]
+modeldata$Bodenfeuchte_Prozent = BCTransform(y = modeldata$Bodenfeuchte_Prozent, lambda = lambda)
+
+# Aufstellen eines GLM. Linkfunktion: log 
+glm = glm(Bodenfeuchte_Prozent ~ ., data=modeldata, family=gaussian(link = "log"))
+summary(glm)
+plot(glm)
+
+# Rücktransformation der Response Variable und der Vorhersage
+glm_predictions = BCTransformInverse(predict(glm, type="response"), lambda = lambda)
+modeldata$Bodenfeuchte_Prozent = BCTransformInverse(modeldata$Bodenfeuchte_Prozent, lambda = lambda)
+
+data = pred(name = "glm", predictions = glm_predictions, data = data, response = response)
+var(yobs = data[!is.na(data$glm), "Bodenfeuchte_Prozent"], ymod = data[!is.na(data$glm), "glm"])
+
+data |> 
+  # Dataframe umgestalten. Spalte mit OOB/INB hinzufügen.
+  pivot_longer(cols=c("bestlinModel", "glm"), names_to='Modell', values_to='Prediction') |>
+  # Zeilen ohne vorhersagewerte löschen
+  drop_na(Prediction) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = Prediction, col = Modell)) +
+  geom_point() +
+  scale_color_manual(values = c("palegreen4", "palegreen2")) +
+  theme_bw()
+```
+
+
 # Baumbasierte Modelle
 
 ## CART
@@ -430,7 +474,7 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", 
-                      "errOOB", "errINB"), 
+                      "errOOB", "errINB", "errglm"), 
                names_to='Modeltype', values_to='RootsquaredError') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(RootsquaredError) |>
@@ -439,19 +483,20 @@ data |>
   # Plot-Elemente
   geom_boxplot() + 
   # Beschriftung
-  scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB", 
-                               "Einfaches lineares Modell", "RF-OOB", "CART")) +
+  scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB",
+                               "Einfaches lineares Modell", "RF-OOB", "CART",
+                               "GLM")) +
   labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
   # Theme
   theme_bw()
 ```
 
-Vergleich der Abweichung von der Diagonalen
+Vergleich der Abweichung von der Diagonalen.
 
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c("linModel", "bestlinModel", "treeModel", "OOB", "INB"), 
+  pivot_longer(cols=c("linModel", "bestlinModel", "glm", "treeModel", "OOB", "INB"), 
                names_to='Modeltype', values_to='predictions') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(predictions) |>
@@ -464,10 +509,10 @@ data |>
   labs(x = "Messwerte", y = "Vorhersage") +
   scale_color_discrete(name = "Modelltyp", 
                        breaks = c("bestlinModel", "INB", "linModel", 
-                                  "OOB", "treeModel"), 
+                                  "OOB", "treeModel", "glm"), 
                        labels = c("Bestes lineares Modell", "RF-INB", 
                                   "Einfaches lineares Modell", "RF-OOB", 
-                                  "CART")) +
+                                  "CART", "GLM")) +
   # Theme
   theme_bw()
 
