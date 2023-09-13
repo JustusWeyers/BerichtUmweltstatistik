@@ -417,16 +417,15 @@ modeldata_transf = data.frame(modeldata)
 # Box-Cox-Transformation der Response-Variable
 bc = MASS::boxcox(linModel)
 lambda = bc$x[which.max(bc$y)]
-# modeldata$Bodenfeuchte_Prozent = BCTransform(y = modeldata$Bodenfeuchte_Prozent, lambda = lambda)
+modeldata_transf$Bodenfeuchte_Prozent = BCTransform(y = modeldata_transf$Bodenfeuchte_Prozent, lambda = lambda)
 
 # Aufstellen eines GLM. Linkfunktion: log 
-glm = glm(Bodenfeuchte_Prozent ~ ., data=modeldata, family=gaussian(link = "log"))
+glm = glm(Bodenfeuchte_Prozent ~ ., data=modeldata_transf, family=gaussian(link = "log"))
 summary(glm)
 plot(glm)
 
 # Rücktransformation der Response Variable und der Vorhersage
 glm_predictions = BCTransformInverse(predict(glm, type="response"), lambda = lambda)
-modeldata$Bodenfeuchte_Prozent = BCTransformInverse(modeldata$Bodenfeuchte_Prozent, lambda = lambda)
 
 data = pred(name = "glm", predictions = glm_predictions, data = data, response = response)
 var(yobs = data[!is.na(data$glm), "Bodenfeuchte_Prozent"], ymod = data[!is.na(data$glm), "glm"])
