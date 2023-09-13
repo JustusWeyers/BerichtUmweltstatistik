@@ -418,11 +418,13 @@ mean(cooks.distance(bestlinModel)) #0.02204445
 ```{r}
 # Arbeitskopie von 'modeldata' erstellen
 modeldata_transf = data.frame(modeldata)
+mean(modeldata$Bodenfeuchte_Prozent)
 
 # Box-Cox-Transformation der Response-Variable
 bc = MASS::boxcox(linModel)
 lambda = bc$x[which.max(bc$y)]
 modeldata_transf$Bodenfeuchte_Prozent = BCTransform(y = modeldata_transf$Bodenfeuchte_Prozent, lambda = lambda)
+mean(modeldata_transf$Bodenfeuchte_Prozent)
 
 # Aufstellen eines GLM. Linkfunktion: log 
 glm = glm(Bodenfeuchte_Prozent ~ ., data=modeldata_transf, family=gaussian(link = "log"))
@@ -433,6 +435,7 @@ plot(glm)
 glm_predictions = BCTransformInverse(predict(glm, type="response"), lambda = lambda)
 
 data = pred(name = "glm", predictions = glm_predictions, data = data, response = response)
+
 var(yobs = data[!is.na(data$glm), "Bodenfeuchte_Prozent"], ymod = data[!is.na(data$glm), "glm"])
 
 data |> 
@@ -499,6 +502,7 @@ data |>
   scale_color_manual(values = c("lightblue", "palegreen4", "palegreen2")) +
   theme_bw()
 ```
+
 ## Modellbewertung
 
 ```{r}
@@ -537,10 +541,10 @@ summary(results)
 resglm = glmulti(glm, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 # Das beste Modell übernehmen
 bestglm = resglm@objects[[1]]
-# Vorhersage und Fehler speichern
-data = pred(name = "bestglm", model = bestglm, 
-            predictors = predictors, data = data, 
-            response = response)
+# Vorhersage
+bestglm_pred = BCTransformInverse(predict(bestglm, newdata = predictors), lambda = lambda)
+# Speichern und Fehlerberechnung
+data = pred(name = "bestglm", predictions = bestglm_pred, data = data, response = response)
 ```
 
 ## Modellbewertung
@@ -643,8 +647,14 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", 
-                      "errOOB", "errINB", "errglm", "errglm_gamma"), 
+  pivot_longer(cols=c("errlinModel", 
+                      "errbestlinModel",
+                      "errglm", 
+                      "errglm_gamma",
+                      "errbestglm",
+                      "errtreeModel", 
+                      "errINB"
+                      ), 
                names_to='Modeltype', values_to='RootsquaredError') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(RootsquaredError) |>
@@ -653,9 +663,6 @@ data |>
   # Plot-Elemente
   geom_boxplot() + 
   # Beschriftung
-  scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB",
-                               "Einfaches lineares Modell", "RF-OOB", "CART",
-                               "GLM", "GLM_gamma")) +
   labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
   # Theme
   theme_bw()
@@ -666,7 +673,13 @@ Vergleich der Abweichung von der Diagonalen.
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c("linModel", "bestlinModel", "glm", "treeModel", "OOB", "INB", "glm_gamma", "bestglm"), 
+  pivot_longer(cols=c("linModel", 
+                      "bestlinModel", 
+                      "glm", 
+                      "glm_gamma", 
+                      "treeModel", 
+                      "INB", 
+                      "bestglm"), 
                names_to='Modeltype', values_to='predictions') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(predictions) |>
@@ -677,16 +690,8 @@ data |>
   geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
   # Beschriftung
   labs(x = "Messwerte", y = "Vorhersage") +
-  scale_color_discrete(name = "Modelltyp", 
-                       breaks = c("bestlinModel", "INB", "linModel", 
-                                  "OOB", "treeModel", "glm", "glm_gamma"), 
-                       labels = c("Bestes lineares Modell", "RF-INB", 
-                                  "Einfaches lineares Modell", "RF-OOB", 
-                                  "CART", "GLM", "GLM_gamma")) +
   # Theme
   theme_bw()
-
-
 ```
 
 # Finale
