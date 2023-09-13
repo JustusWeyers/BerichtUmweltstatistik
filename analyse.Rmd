@@ -190,7 +190,7 @@ data = data %>%
 ## Modelldaten selektieren
 
 ```{r}
-# DAten für die Modellerstellung
+# Daten für die Modellerstellung
 modeldata =  data |> 
   select(all_of(c(predicts, response))) |> 
   na.omit()
@@ -267,6 +267,10 @@ AIC(linModel)
 rmse(actual = data[!is.na(data$linModel), response], 
      predicted = data[!is.na(data$linModel), "linModel"])
 
+# Varianz
+var(yobs = data[!is.na(data$linModel), response], 
+    ymod = na.omit(data$linModel))
+
 # VIF
 # Base-R plot
 {par(mar = c(3, 15, 1, 1)); barplot(vif(linModel), horiz = TRUE, las = 2)}
@@ -340,6 +344,7 @@ data = pred(name = "bestlinModel", model = bestlinModel,
             response = response)
 ```
 
+
 ## Modellbewertung
 
 ```{r}
@@ -370,7 +375,7 @@ summary(results)
 ## Visualisierung
 
 ```{r}
-# Defaut Plots 
+# Default Plots 
 # plot(bestlinModel)
 
 # Vorhersage bestes lineares Model
@@ -408,10 +413,10 @@ min(cooks.distance(bestlinModel)) #5.374797e-06
 mean(cooks.distance(bestlinModel)) #0.02204445
 ```
 
-# GLM
+# GLM - LOG
 
 ```{r}
-# Arbeitskopie von 'modeladata' erstellen
+# Arbeitskopie von 'modeldata' erstellen
 modeldata_transf = data.frame(modeldata)
 
 # Box-Cox-Transformation der Response-Variable
@@ -440,6 +445,128 @@ data |>
   geom_point() +
   scale_color_manual(values = c("palegreen4", "palegreen2")) +
   theme_bw()
+```
+## Modellbewertung
+
+```{r}
+# Beschreibung des GLMs
+summary(glm)
+
+# AIC des GLMS
+AIC(glm)
+
+# RMSE
+rmse(actual = data[!is.na(data$glm), response], 
+     predicted = data[!is.na(data$glm), "glm"])
+
+# Varianz
+var(yobs = data[!is.na(data$glm), response], 
+    ymod = na.omit(data$glm))
+
+# RMSE
+rmse(actual = data[!is.na(data$glm), response], 
+     predicted = data[!is.na(data$glm), "glm"])
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errglm~ data$StratumName) 
+# => p-value = 0.1639: Varianzen gleich
+results = aov(errglm ~ StratumName, data=data)
+summary(results)
+# p-value = 0.171 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+```
+# GLM - GAMMA
+
+```{r}
+# Aufstellen eines GLM. Linkfunktion: gamme
+glm_gamma = glm(Bodenfeuchte_Prozent ~ ., data=modeldata_transf, family=gaussian(link = "inverse"))
+summary(glm_gamma)
+plot(glm_gamma)
+
+# Rücktransformation der Response Variable und der Vorhersage
+glm_gamma_predictions = BCTransformInverse(predict(glm_gamma, type="response"), lambda = lambda)
+
+data = pred(name = "glm_gamma", predictions = glm_gamma_predictions, data = data, response = response)
+var(yobs = data[!is.na(data$glm_gamma), "Bodenfeuchte_Prozent"], ymod = data[!is.na(data$glm_gamma), "glm_gamma"])
+
+data |> 
+  # Dataframe umgestalten. Spalte mit OOB/INB hinzufügen.
+  pivot_longer(cols=c("bestlinModel", "glm", "glm_gamma"), names_to='Modell', values_to='Prediction') |>
+  # Zeilen ohne vorhersagewerte löschen
+  drop_na(Prediction) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = Prediction, col = Modell)) +
+  geom_point() +
+  scale_color_manual(values = c("lightblue", "palegreen4", "palegreen2")) +
+  theme_bw()
+```
+## Modellbewertung
+
+```{r}
+# Beschreibung des GLMs
+summary(glm_gamma)
+
+# AIC des GLMS
+AIC(glm_gamma)
+
+# RMSE
+rmse(actual = data[!is.na(data$glm_gamma), response], 
+     predicted = data[!is.na(data$glm_gamma), "glm_gamma"])
+
+# Varianz
+var(yobs = data[!is.na(data$glm_gamma), response], 
+    ymod = na.omit(data$glm_gamma))
+
+# RMSE
+rmse(actual = data[!is.na(data$glm_gamma), response], 
+     predicted = data[!is.na(data$glm_gamma), "glm_gamma"])
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errglm_gamma~ data$StratumName) 
+# =>p-value = 0.2924: Varianzen gleich
+results = aov(errglm_gamma ~ StratumName, data=data)
+summary(results)
+# p-value = 0.437 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+```
+
+
+# Automatisierte generalisierte Modellselektion
+
+## Modellerstellung
+```{r}
+# Mögliche lineare Modelle nach Güte untersuchen und ordnen
+resglm = glmulti(glm, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+# Das beste Modell übernehmen
+bestglm = resglm@objects[[1]]
+# Vorhersage und Fehler speichern
+data = pred(name = "bestglm", model = bestglm, 
+            predictors = predictors, data = data, 
+            response = response)
+```
+
+## Modellbewertung
+
+```{r}
+# Beschreibung des besten Modells
+summary(bestglm)
+
+# AIC des besten linearen Modells
+resglm@crits[1]
+# AICs der ersten 8 Modelle
+plot(resglm)
+mean(resglm@crits)
+
+# Varianz
+var(yobs = data[!is.na(data$bestglm), response], 
+    ymod = na.omit(data$bestglm))
+# RMSE
+rmse(actual = data[!is.na(data$bestglm), response], 
+     predicted = data[!is.na(data$bestglm), "bestglm"])
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errbestglm~ data$StratumName) 
+# => p-value = 0.006113: Varianzen nicht gleich
+oneway.test(data$errbestglm~data$StratumName)
+# p-value = 4.773e-16 Ergebnis signifikant, Vorhersagen unterscheiden sich
 ```
 
 # CART
@@ -517,7 +644,7 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", "errbestlinModel", "errtreeModel", 
-                      "errOOB", "errINB", "errglm"), 
+                      "errOOB", "errINB", "errglm", "errglm_gamma"), 
                names_to='Modeltype', values_to='RootsquaredError') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(RootsquaredError) |>
@@ -528,7 +655,7 @@ data |>
   # Beschriftung
   scale_fill_discrete(labels=c("Bestes lineares Modell", "RF-INB",
                                "Einfaches lineares Modell", "RF-OOB", "CART",
-                               "GLM")) +
+                               "GLM", "GLM_gamma")) +
   labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
   # Theme
   theme_bw()
@@ -539,7 +666,7 @@ Vergleich der Abweichung von der Diagonalen.
 ```{r}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c("linModel", "bestlinModel", "glm", "treeModel", "OOB", "INB"), 
+  pivot_longer(cols=c("linModel", "bestlinModel", "glm", "treeModel", "OOB", "INB", "glm_gamma", "bestglm"), 
                names_to='Modeltype', values_to='predictions') |>
   # Entfernen von Zeilen mit NAs in der Error-Spalte
   drop_na(predictions) |>
@@ -552,10 +679,10 @@ data |>
   labs(x = "Messwerte", y = "Vorhersage") +
   scale_color_discrete(name = "Modelltyp", 
                        breaks = c("bestlinModel", "INB", "linModel", 
-                                  "OOB", "treeModel", "glm"), 
+                                  "OOB", "treeModel", "glm", "glm_gamma"), 
                        labels = c("Bestes lineares Modell", "RF-INB", 
                                   "Einfaches lineares Modell", "RF-OOB", 
-                                  "CART", "GLM")) +
+                                  "CART", "GLM", "GLM_gamma")) +
   # Theme
   theme_bw()
 
