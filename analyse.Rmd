@@ -36,6 +36,8 @@ library(visreg)
 
 # Baumbasierte Modelle
 library(tree)
+library(rpart)
+library(rpart.plot)
 library(randomForest)
 library(quantregForest)
 
@@ -188,8 +190,15 @@ data = data %>%
 ## Modelldaten selektieren
 
 ```{r}
+# DAten für die Modellerstellung
 modeldata =  data |> 
   select(all_of(c(predicts, response))) |> 
+  na.omit()
+
+# Daten für die Untersuchung auf Korrelation
+cordata = data |>
+  select(all_of(c(predicts, response, "StratumName"))) |> 
+  mutate(StratumName = as.factor(StratumName)) |>
   na.omit()
 
 # Prädiktoren selektieren
@@ -202,17 +211,21 @@ predictors = modeldata |>
 
 # Datenexploration
 
+## Korrelationsuntersuchung
+
 ```{r, warning = FALSE, message=FALSE}
 # Korrelationsmatrix
-corplot = ggpairs(modeldata, 
-                  columnLabels = str_wrap(c(predictsNames, responseName), width = 10)) +
+corplot = ggpairs(cordata, aes(colour = StratumName, alpha = 0.4)) + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme_bw()
-# Export als svg Datei
-# svg(file.path(imgpath, "corplot.svg"), height=8,width=8)
-# corplot
-# dev.off()
-  
+
+# Export von 'corplot' als SVG
+{svg(file.path(imgpath, "corplot.svg"), height=8,width=8);corplot;dev.off()}
+```
+
+## Verteilung der Daten
+
+```{r, warning = FALSE, message=FALSE}
 # Test auf Normalverteiltheit
 shapiro = modeldata |>
   # Shapiro-Wilk Test auf Normalverteiltheit
@@ -225,47 +238,71 @@ shapiro = modeldata |>
   select(-variable)
 
 # Ausgabe von 'shapiro' als LaTex-Tabelle
-# shapiro|>
-#   xtable()
+# shapiro |> xtable()
 ```
 
-# Lineare Modelle
+# Einfaches lineares Modell
 
-## Einfaches lineares Modell
+## Modellerstellung
 
 ```{r}
 # Modellerstellung
 linModel = lm(Bodenfeuchte_Prozent ~ ., data = modeldata)
 
-summary(linModel)
 # Vorhersage und Fehler speichern
 data = pred(name = "linModel", model = linModel, predictors = predictors, 
             data = data, response = response)
+```
+
+## Modellbewertung
+
+```{r}
+# Modellbeschreibung
+summary(linModel)
+
+# Model-Wert für das lineare Modell
+AIC(linModel)
+
 # RMSE
 rmse(actual = data[!is.na(data$linModel), response], 
      predicted = data[!is.na(data$linModel), "linModel"])
 
-#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
-bartlett.test(data$errlinModel~ data$StratumName) #p-value = 0.8407, Varianzen gleich
-results = aov(errlinModel ~ StratumName, data=data)
-summary(results) #P-value: 0.751 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
-
 # VIF
-{
-out <- barplot(vif(linModel), main="", names.arg="")
-text(out, rep(-.1, 6), c("Tiefe zum Ox.horizont", "Mächtigkeit Ox.horizont", "Mächtigkeit_A", "Mächtigkeit_AL", "Geländehöhe"), srt=45, pos=2, xpd=NA, cex=.75)
-text(x = out, y= vif(linModel), 
-     label = paste(round(vif(linModel),3)),
-     pos = 1, cex = 0.8, col = "red")
-}
-# Alternativer VIF-Plot mit ggplot()
+# Base-R plot
+{par(mar = c(3, 15, 1, 1)); barplot(vif(linModel), horiz = TRUE, las = 2)}
+# ggplot
 vifdf = data.frame(vif = vif(linModel), predictors = predictsNames)
 vifdf |>
   ggplot(aes(x = predictors, y = vif)) +
-  geom_bar(stat = "identity") +
+  geom_bar(stat = "identity", fill = "white", col = "black") +
   geom_text(aes(label = format(round(vif, 2))), vjust = -0.3, size = 3.5)+
   labs(x = "Prädiktoren", y = "VIF")+
   scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  theme_bw()
+
+#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+bartlett.test(data$errlinModel~ data$StratumName)
+# => p-value = 0.8407: Varianzen gleich
+results = aov(errlinModel ~ StratumName, data=data)
+summary(results) 
+# => p-value: 0.751: Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+```
+
+## Visualisierung
+
+```{r}
+# Vorhersage Einfaches lineares Modell
+ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
+  geom_point(aes(col = StratumName))+
+  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
+  theme_bw()
+
+# Fehler ~ Stratum
+ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
+  geom_boxplot(aes(fill = StratumName)) +
+  labs(x = "", y = "Wurzel aus Fehlerquadraten")+
+  theme(legend.position="none") +
   theme_bw()
 
 # Barplot zur Cooks-Distance
@@ -279,9 +316,6 @@ max(cooks.distance(linModel)) #0.3255527
 min(cooks.distance(linModel)) #6.002479e-05
 mean(cooks.distance(linModel)) #0.02328232
 
-# Model-Wert für das lineare Modell
-AIC(linModel)
-
 # Regressionsgeraden
 p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", gg= TRUE, ylab= "")
 p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", gg = TRUE, ylab = "")
@@ -291,38 +325,33 @@ p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = TRUE, ylab="")
 (p1+p2)/(p3+p4)/(p5+ plot_spacer())
 ```
 
-## Bestes lineares Modell
+# Autom. Modellselektion
+
+## Modellerstellung
 
 ```{r}
 # Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
-
-# AICs der ersten 8 Modelle
-plot(res)
-mean(res@crits)
-
-# Wichtigkeit von Prädiktoren
-imp = data.frame(importance = getImportance(res))
-imp |> 
-  ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
-  geom_bar(stat="identity") +
-  geom_vline(xintercept = 0.8, color = "red") +
-  labs(x = "", y = "") +
-  theme_bw()
-
-# Das beste Modell extrahieren
+# Das beste Modell übernehmen
 bestlinModel = res@objects[[1]]
-# Beschreibung des besten Modells
-summary(bestlinModel)
-# Defaut Plots 
-plot(bestlinModel)
-# AIC des besten linearen Modells
-res@crits[1]
-
 # Vorhersage und Fehler speichern
 data = pred(name = "bestlinModel", model = bestlinModel, 
             predictors = predictors, data = data, 
             response = response)
+```
+
+## Modellbewertung
+
+```{r}
+# Beschreibung des besten Modells
+summary(bestlinModel)
+
+# AIC des besten linearen Modells
+res@crits[1]
+# AICs der ersten 8 Modelle
+plot(res)
+mean(res@crits)
+
 # Varianz
 var(yobs = data[!is.na(data$bestlinModel), response], 
     ymod = na.omit(data$bestlinModel))
@@ -330,40 +359,19 @@ var(yobs = data[!is.na(data$bestlinModel), response],
 rmse(actual = data[!is.na(data$bestlinModel), response], 
      predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
 
-#Cooks Distance
-
-plot(bestlinModel, 4, main = "", xaxt = "n", ann = F)
-title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
-text(x= 40, y= 0.2,label = "max = 0,199", pos = 4, cex = 0.8)
-text(x= 40, y= 0.18,label = "mean = 0,022", pos = 4,cex = 0.8)
-text(x= 40, y= 0.16,label = "min = 5,37e-05", pos = 4, cex = 0.8)
-
-max(cooks.distance(bestlinModel)) #0.1993562
-min(cooks.distance(bestlinModel)) #5.374797e-06
-mean(cooks.distance(bestlinModel)) #0.02204445
-
 #ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
-bartlett.test(data$errbestlinModel~ data$StratumName) #p-value = 0.9685, Varianzen gleich
+bartlett.test(data$errbestlinModel~ data$StratumName) 
+# => p-value = 0.9685: Varianzen gleich
 results = aov(errbestlinModel ~ StratumName, data=data)
-summary(results) #P-value: 0.55 -> Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+summary(results) 
+# => p-value: 0.55: Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
 ```
 
-## Plots Lineare Modelle
+## Visualisierung
 
 ```{r}
-# Vorhersage Einfaches lineares Model
-ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
-  geom_point(aes(col = StratumName))+
-  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
-  theme_bw()
-
-# Fehler ~ Stratum
-ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
-  geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Wurzel aus Fehlerquadraten")+
-  theme(legend.position="none") +
-  theme_bw()
+# Defaut Plots 
+# plot(bestlinModel)
 
 # Vorhersage bestes lineares Model
 ggplot(data |> drop_na(bestlinModel), aes(x = Bodenfeuchte_Prozent, y = bestlinModel))+
@@ -378,17 +386,38 @@ ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinMode
   labs(x = "", y = "Wurzel aus Fehlerquadraten")+
   theme(legend.position="none") +
   theme_bw()
-  
-# tm_shape(sf(data)) + tm_dots(col = "bestlinModel")
+
+# Wichtigkeit von Prädiktoren
+imp = data.frame(importance = getImportance(res))
+imp |> 
+  ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
+  geom_bar(stat="identity") +
+  geom_vline(xintercept = 0.8, color = "red") +
+  labs(x = "", y = "") +
+  theme_bw()
+
+#Cooks Distance
+plot(bestlinModel, 4, main = "", xaxt = "n", ann = F)
+title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
+text(x= 40, y= 0.2,label = "max = 0,199", pos = 4, cex = 0.8)
+text(x= 40, y= 0.18,label = "mean = 0,022", pos = 4,cex = 0.8)
+text(x= 40, y= 0.16,label = "min = 5,37e-05", pos = 4, cex = 0.8)
+
+max(cooks.distance(bestlinModel)) #0.1993562
+min(cooks.distance(bestlinModel)) #5.374797e-06
+mean(cooks.distance(bestlinModel)) #0.02204445
 ```
 
-## GLM
+# GLM
 
 ```{r}
+# Arbeitskopie von 'modeladata' erstellen
+modeldata_transf = data.frame(modeldata)
+
 # Box-Cox-Transformation der Response-Variable
 bc = MASS::boxcox(linModel)
 lambda = bc$x[which.max(bc$y)]
-modeldata$Bodenfeuchte_Prozent = BCTransform(y = modeldata$Bodenfeuchte_Prozent, lambda = lambda)
+# modeldata$Bodenfeuchte_Prozent = BCTransform(y = modeldata$Bodenfeuchte_Prozent, lambda = lambda)
 
 # Aufstellen eines GLM. Linkfunktion: log 
 glm = glm(Bodenfeuchte_Prozent ~ ., data=modeldata, family=gaussian(link = "log"))
@@ -414,23 +443,38 @@ data |>
   theme_bw()
 ```
 
-
-# Baumbasierte Modelle
-
-## CART
+# CART
 
 ```{r}
 # Baum erstellen
-treeModel = tree(Bodenfeuchte_Prozent ~ ., data = modeldata)
+treeModel <- rpart(Bodenfeuchte_Prozent ~ ., data = modeldata)
 # Vorhersage und Fehler speichern
 data = pred(name = "treeModel", model = treeModel, 
             predictors = predictors, data = data, 
             response = response)
 # Baumplot
-{plot(treeModel);text(treeModel)}
+rpart.plot(treeModel, digits = 4)
+
+# Stufen
+modeldata %>%
+  mutate(pred = predict(treeModel, modeldata)) %>%
+  ggplot(aes(Gelaendehoehe_m, Bodenfeuchte_Prozent)) +
+  geom_point(alpha = .2, size = 1) +
+  geom_point(aes(Gelaendehoehe_m, y = Bodenfeuchte_Prozent), color = "blue", size = .75) +
+  geom_line(aes(y = pred), color = "red", size = .75) +
+  labs(x = "Geländehoehe [m]", y = "Bodenfeuchte [%]") +
+  theme_bw()
+
+data  |> 
+  drop_na(treeModel) |>
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = treeModel, col = Gelaendehoehe_m)) +
+  geom_point() +
+  labs(x = "Messwerte Bodenfeuchte [%]", y = "Vorhersage Entscheidungsbaum") +
+  scale_color_continuous(name = "Geländehöhe [m]", low = "forestgreen", high = "burlywood2") +
+  theme_bw()
 ```
 
-## Random Forest
+# Random Forest
 
 ```{r}
 # Wald anlegen
