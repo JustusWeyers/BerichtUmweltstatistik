@@ -313,11 +313,11 @@ ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
   theme_bw()
 
 # Barplot zur Cooks-Distance
-plot(linModel, 4, main = "", xaxt = "n", ann = F)
+{plot(linModel, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
 text(x= 40, y= 0.3,label = "max = 0,326", pos = 4, cex = 0.8)
 text(x= 40, y= 0.25,label = "mean = 0,023", pos = 4,cex = 0.8)
-text(x= 40, y= 0.2,label = "min = 6,00e-05", pos = 4, cex = 0.8)
+text(x= 40, y= 0.2,label = "min = 6,00e-05", pos = 4, cex = 0.8)}
 
 max(cooks.distance(linModel)) #0.3255527
 min(cooks.distance(linModel)) #6.002479e-05
@@ -480,6 +480,7 @@ results = aov(errglm ~ StratumName, data=data)
 summary(results)
 # p-value = 0.171 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
 ```
+
 # GLM - GAMMA
 
 ```{r}
@@ -610,6 +611,7 @@ results =aov(data$errbestglm~data$StratumName)
 summary(results)
 # p-value = 0.123 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
 ```
+
 ## Visualisierung 
 
 ```{r}
@@ -641,6 +643,7 @@ ggplot(data |> drop_na(errbestglm), aes(x = StratumName, y = errbestglm)) +
   theme_bw()
 
 ```
+
 # Visualisierung Vergleich lineare Modelle
 
 ```{r}
@@ -835,9 +838,6 @@ data |>
   # Theme
   theme_bw()
 ```
-
-
-
 
 # Finale
 

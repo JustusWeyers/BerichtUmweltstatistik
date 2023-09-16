@@ -1,3 +1,8 @@
 *.html
 *.Rhistory
 *.RData
+*.svg
+*.dbf
+
+Data/DATA.csv
+
