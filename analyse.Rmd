@@ -782,6 +782,13 @@ data |>
   labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
   # Theme
   theme_bw()
+
+{
+par(mar = c(4, 8, 2, 0.5))
+boxplot(data[,c("errlinModel", "errbestlinModel", "errglm", "errglm_gamma", 
+                "errbestglm","errtreeModel", "errINB")], las = 1, 
+        horizontal = TRUE, xlab = "Fehlerquadrate")
+}
 ```
 
 Vergleich der Abweichung von der Diagonalen.
