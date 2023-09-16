@@ -257,6 +257,9 @@ data = pred(name = "linModel", model = linModel, predictors = predictors,
 ## Modellbewertung
 
 ```{r}
+plot(linModel)
+reslin <- resid(linModel)
+plot(density(reslin))
 # Modellbeschreibung
 summary(linModel)
 
@@ -305,7 +308,7 @@ ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel))+
 # Fehler ~ Stratum
 ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
   geom_boxplot(aes(fill = StratumName)) +
-  labs(x = "", y = "Wurzel aus Fehlerquadraten")+
+  labs(x = "", y = "Wurzel aus Fehlerquadraten", fill = "Stratum")+
   theme(legend.position="none") +
   theme_bw()
 
@@ -480,8 +483,8 @@ summary(results)
 # GLM - GAMMA
 
 ```{r}
-# Aufstellen eines GLM. Linkfunktion: gamme
-glm_gamma = glm(Bodenfeuchte_Prozent ~ ., data=modeldata_transf, family=gaussian(link = "inverse"))
+# Aufstellen eines GLM. Linkfunktion: gamma
+glm_gamma = glm(Bodenfeuchte_Prozent ~ ., data=modeldata_transf, family= gaussian(link = "inverse"))
 summary(glm_gamma)
 plot(glm_gamma)
 
@@ -520,9 +523,16 @@ rmse(actual = data[!is.na(data$glm_gamma), response],
 var(yobs = data[!is.na(data$glm_gamma), response], 
     ymod = na.omit(data$glm_gamma))
 
-# RMSE
-rmse(actual = data[!is.na(data$glm_gamma), response], 
-     predicted = data[!is.na(data$glm_gamma), "glm_gamma"])
+#Cook´s Distance
+plot(glm_gamma, 4, main = "", xaxt = "n", ann = F)
+title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
+text(x= 33, y= 0.09,label = "max = 0,101", pos = 4, cex = 0.8)
+text(x= 33, y= 0.08,label = "mean = 0,019", pos = 4,cex = 0.8)
+text(x= 33, y= 0.07,label = "min = 9,22e-07", pos = 4, cex = 0.8)
+
+max(cooks.distance(glm_gamma)) #0.1013789
+min(cooks.distance(glm_gamma)) #9.217823e-07
+mean(cooks.distance(glm_gamma))#0.0185927
 
 #ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errglm_gamma~ data$StratumName) 
@@ -531,14 +541,30 @@ results = aov(errglm_gamma ~ StratumName, data=data)
 summary(results)
 # p-value = 0.437 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
 ```
+## Visualisierung
+```{r}
+ggplot(data |> drop_na(glm_gamma), aes(x = Bodenfeuchte_Prozent, y = glm_gamma))+
+  geom_point(aes(col = StratumName))+
+  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
+  ylim(10,85)+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
+  theme_bw()
+
+#Fehler ~ Stratum
+ggplot(data |> drop_na(errglm_gamma), aes(x = StratumName, y = errglm_gamma)) +
+  geom_boxplot(aes(fill = StratumName)) +
+  labs(x = "", y = "Wurzel aus Fehlerquadraten", fill = "Stratum")+
+  theme(legend.position="none") +
+  theme_bw()
+```
 
 
 # Automatisierte generalisierte Modellselektion
 
 ## Modellerstellung
 ```{r}
-# Mögliche lineare Modelle nach Güte untersuchen und ordnen
-resglm = glmulti(glm, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+# Mögliche GLMs nach Güte untersuchen und ordnen
+resglm = glmulti(glm_gamma, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 # Das beste Modell übernehmen
 bestglm = resglm@objects[[1]]
 # Vorhersage
@@ -550,10 +576,10 @@ data = pred(name = "bestglm", predictions = bestglm_pred, data = data, response 
 ## Modellbewertung
 
 ```{r}
-# Beschreibung des besten Modells
+# Beschreibung des besten GLMs
 summary(bestglm)
 
-# AIC des besten linearen Modells
+# AIC des besten GLMs
 resglm@crits[1]
 # AICs der ersten 8 Modelle
 plot(resglm)
@@ -566,11 +592,101 @@ var(yobs = data[!is.na(data$bestglm), response],
 rmse(actual = data[!is.na(data$bestglm), response], 
      predicted = data[!is.na(data$bestglm), "bestglm"])
 
+#Cook´s Distance
+plot(bestglm, 4, main = "", xaxt = "n", ann = F)
+title(xlab="Datenpunkt", ylab ="Cooksche Distanz")
+text(x= 37, y= 0.13,label = "max = 0,152", pos = 4, cex = 0.8)
+text(x= 37, y= 0.12,label = "mean = 0,021", pos = 4,cex = 0.8)
+text(x= 37, y= 0.11,label = "min = 9,41e-05", pos = 4, cex = 0.8)
+
+max(cooks.distance(bestglm)) #0.1523492
+min(cooks.distance(bestglm)) #9.41153e-05
+mean(cooks.distance(bestglm)) #0.02075966
+
 #ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errbestglm~ data$StratumName) 
-# => p-value = 0.006113: Varianzen nicht gleich
-oneway.test(data$errbestglm~data$StratumName)
-# p-value = 4.773e-16 Ergebnis signifikant, Vorhersagen unterscheiden sich
+# => p-value = 0.305: Varianzen gleich
+results =aov(data$errbestglm~data$StratumName)
+summary(results)
+# p-value = 0.123 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+```
+## Visualisierung 
+
+```{r}
+# Wichtigkeit von Prädiktoren
+imp = data.frame(importance = getImportance(resglm))
+imp |> 
+  ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
+  geom_bar(stat="identity") +
+  geom_vline(xintercept = 0.8, color = "red") +
+  labs(x = "", y = "") +
+  theme_bw()
+
+
+
+ggplot(data |> drop_na(bestglm), aes(x = Bodenfeuchte_Prozent, y = bestglm))+
+  geom_point(aes(col = StratumName))+
+  labs(x = "Messwerte", y = "Vorhersage", colour = "Stratum")+
+  ylim(10,85)+
+  geom_abline(slope = 1) + annotate("text", x = 52, y = 45, label = "y = 1x") +
+  theme_bw()
+
+
+
+#Fehler ~ Stratum
+ggplot(data |> drop_na(errbestglm), aes(x = StratumName, y = errbestglm)) +
+  geom_boxplot(aes(fill = StratumName)) +
+  labs(x = "", y = "Wurzel aus Fehlerquadraten", fill = "Stratum")+
+  theme(legend.position="none") +
+  theme_bw()
+
+```
+# Visualisierung Vergleich lineare Modelle
+
+```{r}
+data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c("linModel", 
+                      "bestlinModel", 
+                      "glm_gamma", 
+                      "bestglm"), 
+               names_to='Modeltype', values_to='predictions') |>
+  # Entfernen von Zeilen mit NAs in der Error-Spalte
+  drop_na(predictions) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
+  # Plot Elemente
+  geom_point(aes(color = Modeltype)) + 
+  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
+  # Beschriftung
+  labs(x = "Messwerte", y = "Vorhersage") +
+  # Theme
+  theme_bw()
+
+
+
+data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c("errlinModel", 
+                      "errbestlinModel",
+                      "errglm_gamma",
+                      "errbestglm",
+                      ), 
+               names_to='Modeltype', values_to='RootsquaredError') |>
+  # Entfernen von Zeilen mit NAs in der Error-Spalte
+  drop_na(RootsquaredError) |>
+  # ggplot
+  ggplot(aes(x = StratumName, y = RootsquaredError, fill = Modeltype)) + 
+  # Plot-Elemente
+  geom_boxplot() + 
+  # Beschriftung
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
+  scale_fill_discrete(labels = c("Selektiertes GLM", "Selektiertes LM", "GLM", "LM"))+
+  # Theme
+  theme_bw()
+
+
+
 ```
 
 # CART
@@ -693,6 +809,28 @@ data |>
   # Theme
   theme_bw()
 ```
+
+```{r}
+data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c( "bestlinModel", 
+                       "bestglm"), 
+               names_to='Modeltype', values_to='predictions') |>
+  # Entfernen von Zeilen mit NAs in der Error-Spalte
+  drop_na(predictions) |>
+  # ggplot
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
+  # Plot Elemente
+  geom_point(aes(color = Modeltype)) + 
+  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
+  # Beschriftung
+  labs(x = "Messwerte", y = "Vorhersage") +
+  # Theme
+  theme_bw()
+```
+
+
+
 
 # Finale
 
