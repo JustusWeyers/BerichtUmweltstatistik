@@ -565,9 +565,6 @@ summary(glm_gamma)
 # Default plots
 # plot(glm_gamma)
 
-# Beschreibung des GLMs
-summary(glm_gamma)
-
 # AIC des GLMS
 AIC(glm_gamma)
 
@@ -579,7 +576,7 @@ rmse(actual = data[!is.na(data$glm_gamma), response],
 var(yobs = data[!is.na(data$glm_gamma), response], 
     ymod = na.omit(data$glm_gamma))
 
-#Cook´s Distance
+# Cook´s Distance
 {svg(mk("glm/glm_cooksdistance.svg"), width = 15.5, height = 7)
 plot(glm_gamma, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
@@ -837,7 +834,7 @@ treeLine = data |>
   geom_point(aes(col = StratumName)) +
   scale_color_manual(values = colouring, name = "Stratum") +
   # Stufenlinie hinzufügen
-  geom_line(aes(y = treeModel), color = "red", size = .75) +
+  geom_line(aes(y = treeModel), color = "red", linewidth = .75) +
   # BEschriftungen, Layout und theme
   labs(x = "Geländehoehe [m]", y = "Bodenfeuchte [%]") +
   theme_bw() +
