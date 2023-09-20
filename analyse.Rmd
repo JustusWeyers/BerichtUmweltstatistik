@@ -53,8 +53,10 @@ library(xtable)
 ```{r, warning = FALSE, message=FALSE}
 # Seed festlegen
 set.seed(1)
-# Kartenansicht auf interaktiv einstellen
+# Interaktive Kartenansicht
 tmap::tmap_mode("view")
+# Farbauswahl - https://github.com/karthik/wesanderson
+colouring = wes_palette("Cavalcanti1", n = 3)
 ```
 
 ## Funktionsdefinitionen
@@ -92,15 +94,15 @@ pred = function(name, model, predictors = NA, data, response,
 var = function(yobs, ymod) {
   SST = sum((yobs - mean(yobs))^2)
   SSE = sum((yobs - ymod)^2)
-  R2 = 1-SSE/SST
+  R2 = 1 - SSE / SST
   vec = setNames(c(SST, SSE, R2), c("SST", "SSE", "R2"))
   return(vec)
 }
 
 # Funktion, um aus einem Dataframe ein 
 # simple feature zu erstellen
-sf = function(df) {
-  st_as_sf(df, coords = c("x_UTM", "y_UTM"), crs = st_crs(25833))
+sf = function(df, epsg = 25833, coords = c("x_UTM", "y_UTM")) {
+  return(st_as_sf(df, coords = coords, crs = st_crs(epsg)))
 }
 
 # Funktion um die Wichtigkeit von Prädiktoren 
@@ -109,33 +111,35 @@ sf = function(df) {
 # (modifiziert)
 getImportance = function(x) {
   # plots variable (i.e. terms) importances
-	ww = exp(-(x@crits - x@crits[1])/2)
-	ww=ww/sum(ww)
+	ww = exp(-(x@crits - x@crits[1]) / 2)
+	ww = ww / sum(ww)
 	# handle synonymies for interactions
 	# this translates to unique notations (e.g. x:y and y:x are the same)
-	clartou=function(x) {
-		sort(strsplit(x, ":")[[1]])-> pieces
-		if (length(pieces)>1) paste(pieces[1],":",pieces[2],sep="")
+	clartou = function(x) {
+		sort(strsplit(x, ":")[[1]]) -> pieces
+		if (length(pieces) > 1) paste(pieces[1], ":", pieces[2], sep="")
 		else x
 		}
 	# list terms in models
-	tet = lapply(x@formulas, function(x) sapply(attr(delete.response(terms(x)),"term.labels"), clartou))
+	tet = lapply(x@formulas, function(x) sapply(attr(delete.response(terms(x)),
+	                                                 "term.labels"), clartou))
 	# all unique terms
-	unique(unlist(tet))-> allt
+	unique(unlist(tet)) -> allt
 	# importances
-	sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)]))-> imp
+	sapply(allt, function(x) sum(ww[sapply(tet, function(t) x%in%t)])) -> imp
 	return(imp)
 }
 
 # Funktionen um Daten mit Hilfe der 
 # Box-Cox-Transformation zu transformieren
 BCTransform <- function(y, lambda=0) {
-    if (lambda == 0L) { log(y) }
-    else { (y^lambda - 1) / lambda }
+    if (lambda == 0L) log(y)
+    else ((y^lambda - 1) / lambda)
 }
+# Rücktransformation mit Box-Cox
 BCTransformInverse <- function(yt, lambda=0) {
-    if (lambda == 0L) { exp(yt) }
-    else { exp(log(1 + lambda * yt)/lambda) }
+    if (lambda == 0L) exp(yt)
+    else exp(log(1 + lambda * yt)/lambda)
 }
 
 # Funktion zum Anlegen von Ordnern einer Datei
@@ -195,7 +199,7 @@ readin = read.table(inputdata, header = TRUE)
 # Variablen von Interesse auswählen
 data = readin |>
   select(all_of(c("Punkt", "Jahr", "Stratum", "x_UTM", "y_UTM", 
-                   predicts, response)))
+                  predicts, response)))
 
 # Neue Spalte anlegen mit Namen der Straten
 data = data %>%
@@ -227,8 +231,9 @@ predictors = modeldata |>
 ## Korrelationsuntersuchung
 
 ```{r, warning = FALSE, message=FALSE}
-# Korrelationsmatrix
+# Korrelationsmatrix mit ggpairs
 corplot = ggpairs(modeldata) + 
+  # Layout und theme
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme_bw()
 
@@ -252,9 +257,15 @@ data = pred(name = "linModel", model = linModel, predictors = predictors,
 ## Modellbewertung
 
 ```{r}
-plot(linModel)
+# Default plots
+# plot(linModel)
+
+# Residuen des einfachen LMs
 reslin <- resid(linModel)
-plot(density(reslin))
+# Sind die Residuen normalverteilt?
+shapiro.test(reslin)
+# Dichtekurve der Residuen
+# plot(density(reslin))
 
 # Modellbeschreibung
 summary(linModel)
@@ -267,56 +278,98 @@ rmse(actual = data[!is.na(data$linModel), response],
      predicted = data[!is.na(data$linModel), "linModel"])
 
 # Varianz
-var(yobs = data[!is.na(data$linModel), response], 
-    ymod = na.omit(data$linModel))
+var(yobs = data[!is.na(data$linModel), response], ymod = na.omit(data$linModel))
 
-# VIF
-# ggplot
+# VIF - Dataframe
 vifdf = data.frame(vif = vif(linModel), predictors = predictsNames)
-vifplot = vifdf |>
-  ggplot(aes(x = predictors, y = vif)) +
-  geom_bar(stat = "identity", fill = "white", col = "black") +
-  geom_text(aes(label = format(round(vif, 2))), vjust = 2, size = 3.5)+
-  labs(x = "Prädiktoren", y = "VIF")+
-  scale_x_discrete(labels = function(x) gsub("\n", "\n\n", str_wrap(x, width = 10))) +
-  theme_bw()
 
-saveAsSVG(vifplot, "sonstige/VIF.svg", h = 7)
-
-#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+# ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errlinModel~ data$StratumName)
 # => p-value = 0.8407: Varianzen gleich
 results = aov(errlinModel ~ StratumName, data=data)
 summary(results) 
-# => p-value: 0.751: Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+# => p-value: 0.751: Ergebnis nicht signifikant, 
+# Vorhersagen unterscheiden sich nicht
 ```
 
 ## Visualisierung
 
 ```{r}
 # Vorhersage Einfaches lineares Modell
-plot_linModelPrediction = ggplot(data |> drop_na(linModel), aes(x = Bodenfeuchte_Prozent, y = linModel)) +
+plot_linModelPrediction = data |> 
+  # Zeilen ohne Vorhersagewert löschen
+  drop_na(linModel) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = linModel)) +
+  # Scatterplot
   geom_point(aes(col = StratumName)) +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_color_manual(values = colouring) +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftungen und theme
   labs(x = r"($y$)", y = r"($y_{linModel}$)", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 25, label = "y = 1x") +
+  annotate("text", x = 52, y = 25, label = "y = 1x") +
   theme_bw()
+
 # Export als SVG
 saveAsSVG(plot_linModelPrediction, "linModel/linModelPrediction.svg")
 
 # Fehler ~ Stratum
-plot_linModelError = ggplot(data |> drop_na(errlinModel), aes(x = StratumName, y = errlinModel)) +
+plot_linModelError = data |> 
+  # Zeilen ohne Fehlerwert löschen
+  drop_na(errlinModel) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errlinModel)) +
+  # Boxplot anlegen
   geom_boxplot(aes(fill = StratumName)) +
-  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftungen, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{linModel})^2}$)")+
   theme_bw() +
   theme(legend.position="none")
+
 # Export als SVG
 saveAsSVG(plot_linModelError, "linModel/linModelError.svg")
-saveAsSVG((plot_linModelPrediction|plot_linModelError), "linModel/linModel_page.svg")
+# Export der Kombination aus plot_linModelPrediction und plot_linModelError
+saveAsSVG((plot_linModelPrediction | plot_linModelError), 
+          "linModel/linModel_page.svg")
+
+# Regressionsgeraden mit VisReg
+p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", 
+             gg = TRUE, ylab = "")
+p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", 
+             gg = TRUE, ylab = "")
+p3 <- visreg(linModel, xvar = "Maechtigkeit_Oxidationshorizont_cm", 
+             gg = TRUE, ylab = "Bodenfeuchte[%]")
+p4 <- visreg(linModel, xvar = "Maechtigkeit_A_Horizont_cm", 
+             gg = TRUE, ylab = "")
+p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", 
+             gg = TRUE, ylab = "")
+# Export der Regressionsgeraden als SVG
+saveAsSVG((p1+p2)/(p3+p4)/(p5+ plot_spacer()), h = 10,
+          "linModel/linModel_Regressionsgeraden.svg")
+
+# VIF - Plot
+vifplot = vifdf |>
+  # ggplot initialisieren
+  ggplot(aes(x = predictors, y = vif)) +
+  # Balkendiagramm
+  geom_bar(stat = "identity", fill = "white", col = "black") +
+  # Balkenbeschriftung
+  geom_text(aes(label = format(round(vif, 2))), vjust = 2, size = 3.5) +
+  # Beschriftung, Layout und theme
+  labs(x = "Prädiktoren", y = "VIF") +
+  scale_x_discrete(labels = function(x) {
+    # Funktion für Zeilenumbrüche in  x-Achsenbeschriftung
+    gsub("\n", "\n\n", str_wrap(x, width = 10))
+  }) +
+  theme_bw()
+
+# Abspeichern des VIF - Plots als Vektorgrafik
+saveAsSVG(vifplot, "sonstige/VIF.svg", h = 7)
 
 # Barplot zur Cooks-Distance
-{svg(file.path(imgpath, "linModel/linModel_cooksdistance.svg"), width = 15.5, height = 7)
+{svg(mk("linModel/linModel_cooksdistance.svg"), width = 15.5, height = 7)
 plot(linModel, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
 text(x= 40, y= 0.3,label = "max = 0,326", pos = 4, cex = 0.8)
@@ -324,28 +377,28 @@ text(x= 40, y= 0.25,label = "mean = 0,023", pos = 4,cex = 0.8)
 text(x= 40, y= 0.2,label = "min = 6,00e-05", pos = 4, cex = 0.8)
 dev.off()}
 
-max(cooks.distance(linModel)) #0.3255527
-min(cooks.distance(linModel)) #6.002479e-05
-mean(cooks.distance(linModel)) #0.02328232
+max(cooks.distance(linModel)) 
+# => 0.3255527
+min(cooks.distance(linModel)) 
+# => 6.002479e-05
+mean(cooks.distance(linModel))
+# => 0.02328232
 
-# Regressionsgeraden
-p1 <- visreg(linModel, xvar = "Gelaendehoehe_m", gg= TRUE, ylab= "")
-p2 <- visreg(linModel, xvar = "Tiefe_zum_Oxidationshorizont_cm", gg = TRUE, ylab = "")
-p3 <- visreg(linModel, xvar = "Maechtigkeit_Oxidationshorizont_cm",gg = TRUE, ylab= "Bodenfeuchte[%]")
-p4 <- visreg(linModel, xvar = "Maechtigkeit_A_Horizont_cm", gg = TRUE, ylab = "")
-p5 <- visreg(linModel, xvar = "Maechtigkeit_AL_Schicht_cm", gg = TRUE, ylab="")
-saveAsSVG((p1+p2)/(p3+p4)/(p5+ plot_spacer()), "linModel/linModel_Regressionsgeraden.svg", h =10)
-
-# Sind die Residuen normalverteilt?
-normdist = ggplot(data.frame(x = linModel$residuals), aes(x = x)) + 
+# Dichtekurve mit ggplot
+normdist = data.frame(res = linModel$residuals) |>
+  # ggplot initialisieren
+  ggplot(aes(x = res)) + 
+  # Verteilung
   geom_density() +
+  # Beschriftung und theme
   labs(x = r"($y-y_{linModel}$)") +
   theme_classic()
+
+# Export als SVG
 saveAsSVG(normdist, "linModel/linModel_ResidualsDensity.svg")
-shapiro.test(linModel$residuals)
 ```
 
-# Autom. Modellselektion
+# Autom. Modellselektion (LM)
 
 ## Modellerstellung
 
@@ -355,9 +408,8 @@ res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 # Das beste Modell übernehmen
 bestlinModel = res@objects[[1]]
 # Vorhersage und Fehler speichern
-data = pred(name = "bestlinModel", model = bestlinModel, 
-            predictors = predictors, data = data, 
-            response = response)
+data = pred(name = "bestlinModel", model = bestlinModel, response = response, 
+            data = data, predictors = predictors)
 ```
 
 
@@ -369,23 +421,29 @@ summary(bestlinModel)
 
 # AIC des besten linearen Modells
 res@crits[1]
-mean(res@crits)
+
 # AICs der ersten 8 Modelle
+mean(res@crits)
 svg(mk("linModelAuto/AICs.svg"));plot(res);dev.off()
 
 # Varianz
 var(yobs = data[!is.na(data$bestlinModel), response], 
     ymod = na.omit(data$bestlinModel))
+
 # RMSE
 rmse(actual = data[!is.na(data$bestlinModel), response], 
      predicted = data[!is.na(data$bestlinModel), "bestlinModel"])
+
+# Wichtigkeit von Prädiktoren
+imp = data.frame(importance = getImportance(res))
 
 #ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errbestlinModel~ data$StratumName) 
 # => p-value = 0.9685: Varianzen gleich
 results = aov(errbestlinModel ~ StratumName, data=data)
 summary(results) 
-# => p-value: 0.55: Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+# => p-value: 0.55: Ergebnis nicht signifikant.
+# Vorhersagen unterscheiden sich nicht
 ```
 
 ## Visualisierung
@@ -395,39 +453,63 @@ summary(results)
 # plot(bestlinModel)
 
 # Vorhersage bestes lineares Model
-plot_linModelAutoPrediction = ggplot(data |> drop_na(bestlinModel), aes(x = Bodenfeuchte_Prozent, y = bestlinModel)) +
+plot_linModelAutoPrediction = data |> 
+  # Zeilen ohne Vorhersagewerte löschen
+  drop_na(bestlinModel) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = bestlinModel)) +
+  # Scatterplot
   geom_point(aes(col = StratumName)) +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_color_manual(values = colouring) +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftungen
   labs(x = r"($y$)", y = r"($y_{linModelAuto}$)", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 25, label = "y = 1x") +
+  annotate("text", x = 52, y = 25, label = "y = 1x") +
   theme_bw()
-plot_linModelAutoPrediction
+
 # Export als SVG
-saveAsSVG(plot_linModelAutoPrediction, "linModelAuto/linModelAutoPrediction.svg")
+saveAsSVG(plot_linModelAutoPrediction, 
+          "linModelAuto/linModelAutoPrediction.svg")
 
 # Fehler ~ Stratum
-plot_linModelAutoError = ggplot(data |> drop_na(errbestlinModel), aes(x = StratumName, y = errbestlinModel)) +
+plot_linModelAutoError = data |> 
+  # Zeilen ohne Fehlerwert löschen
+  drop_na(errbestlinModel) |>
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errbestlinModel)) +
+  # Boxplot
   geom_boxplot(aes(fill = StratumName)) +
-  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftungen, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{linModelAuto})^2}$)")+
   theme_bw() +
   theme(legend.position="none")
+
 # Export als SVG
 saveAsSVG(plot_linModelAutoError, "linModelAuto/linModelAutoError.svg")
-saveAsSVG((plot_linModelAutoPrediction|plot_linModelAutoError), "linModelAuto/linModelAuto_page.svg")
+# Export der Kombination plot_linModelAutoPrediction und plot_linModelAutoError
+saveAsSVG((plot_linModelAutoPrediction | plot_linModelAutoError), 
+          "linModelAuto/linModelAuto_page.svg")
 
-# Wichtigkeit von Prädiktoren
-imp = data.frame(importance = getImportance(res))
+# Plot zur Wichtigkeit von Prädiktoren
 impplot = imp |> 
+  # ggplot initialisieren
   ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
+  # Barplot
   geom_bar(stat="identity", fill = "white", col = "black") +
+  # Vertikale Linie bei 0.8
   geom_vline(xintercept = 0.8, color = "red") +
+  # Beschriftungen und theme
   labs(x = "", y = "") +
   theme_bw()
+
+# Export als SVG
 saveAsSVG(impplot, "sonstige/Importance.svg", h = 3.5)
 
 # Cooks Distance
-{svg(file.path(imgpath, "linModelAuto/linModelAuto_cooksdistance.svg"), width = 15.5, height = 7)
+{svg(mk("linModelAuto/linModelAuto_cooksdistance.svg"), width = 15.5, 
+     height = 7)
 plot(bestlinModel, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
 text(x= 40, y= 0.2,label = "max = 0,199", pos = 4, cex = 0.8)
@@ -435,12 +517,17 @@ text(x= 40, y= 0.18,label = "mean = 0,022", pos = 4,cex = 0.8)
 text(x= 40, y= 0.16,label = "min = 5,37e-05", pos = 4, cex = 0.8)
 dev.off()}
 
-max(cooks.distance(bestlinModel)) #0.1993562
-min(cooks.distance(bestlinModel)) #5.374797e-06
-mean(cooks.distance(bestlinModel)) #0.02204445
+max(cooks.distance(bestlinModel))
+# => 0.1993562
+min(cooks.distance(bestlinModel))
+# => 5.374797e-06
+mean(cooks.distance(bestlinModel)) 
+# => 0.02204445
 ```
 
 # GLM - GAMMA
+
+## Modellerstellung
 
 ```{r}
 # Arbeitskopie von 'modeldata' erstellen
@@ -449,18 +536,33 @@ modeldata_transf = data.frame(modeldata)
 # Box-Cox-Transformation der Response-Variable
 bc = MASS::boxcox(linModel)
 lambda = bc$x[which.max(bc$y)]
-modeldata_transf$Bodenfeuchte_Prozent = BCTransform(y = modeldata_transf$Bodenfeuchte_Prozent, lambda = lambda)
+# Anwendung der Transformation auf die Arbeitskopie
+modeldata_transf = modeldata_transf |> 
+  # Spalte 'Bodenfeuchte_Prozent' überschreiben
+  mutate(Bodenfeuchte_Prozent = BCTransform(
+    y = modeldata_transf$Bodenfeuchte_Prozent, 
+    lambda = lambda)
+    )
 
 # Aufstellen eines GLM. Linkfunktion: gamma
-glm_gamma = glm(Bodenfeuchte_Prozent ~ ., data = modeldata_transf, family = gaussian(link = "inverse"))
+glm_gamma = glm(Bodenfeuchte_Prozent ~ ., data = modeldata_transf, 
+                family = gaussian(link = "inverse"))
+
+# Rücktransformation der Vorhersage
+glm_gamma_predictions = BCTransformInverse(predict(glm_gamma, type="response"), 
+                                           lambda = lambda)
+
+# Abspechern und Fehler berechnen
+data = pred(name = "glm_gamma", predictions = glm_gamma_predictions, 
+            data = data, response = response)
+```
+
+## Modellbewertung
+
+```{r}
 summary(glm_gamma)
 plot(glm_gamma)
 
-# Rücktransformation der Response Variable und der Vorhersage
-glm_gamma_predictions = BCTransformInverse(predict(glm_gamma, type="response"), lambda = lambda)
-
-# Abspechern und Fehler berechnen
-data = pred(name = "glm_gamma", predictions = glm_gamma_predictions, data = data, response = response)
 ```
 
 ## Modellbewertung
@@ -489,55 +591,80 @@ text(x= 33, y= 0.08,label = "mean = 0,019", pos = 4,cex = 0.8)
 text(x= 33, y= 0.07,label = "min = 9,22e-07", pos = 4, cex = 0.8)
 dev.off()}
 
-max(cooks.distance(glm_gamma)) #0.1013789
-min(cooks.distance(glm_gamma)) #9.217823e-07
-mean(cooks.distance(glm_gamma))#0.0185927
+max(cooks.distance(glm_gamma)) 
+# => 0.1013789
+min(cooks.distance(glm_gamma)) 
+# => 9.217823e-07
+mean(cooks.distance(glm_gamma))
+# => 0.0185927
 
-#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+# ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errglm_gamma~ data$StratumName) 
-# =>p-value = 0.2924: Varianzen gleich
+# => p-value = 0.2924: Varianzen gleich
 results = aov(errglm_gamma ~ StratumName, data=data)
 summary(results)
-# p-value = 0.437 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+# => p-value = 0.437: Ergebnis nicht signifikant.
+# Vorhersagen unterscheiden sich nicht
 ```
 
 ## Visualisierung
 
 ```{r}
 # Vorhersage GLM
-plot_glmPrediction = ggplot(data |> drop_na(glm_gamma), aes(x = Bodenfeuchte_Prozent, y = glm_gamma)) +
+plot_glmPrediction = data |> 
+  # Zeilen ohne GLM Vorhersagen löschen
+  drop_na(glm_gamma) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = glm_gamma)) +
+  # Scatterplot
   geom_point(aes(col = StratumName)) +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3)) +
-  labs(x = r"($y$)", y = r"($y_{glm}$)", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 25, label = "y = 1x") +
+  scale_color_manual(values = colouring) +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftung und theme
+  labs(x = r"($y$)", y = r"($y_{glm}$)", colour = "Stratum") +
+  annotate("text", x = 52, y = 25, label = "y = 1x") +
   theme_bw()
+
 # Export als SVG
 saveAsSVG(plot_glmPrediction, "glm/glmPrediction.svg")
 
 # Fehler ~ Stratum
-plot_glmError = ggplot(data |> drop_na(errglm_gamma), aes(x = StratumName, y = errglm_gamma)) +
+plot_glmError = data |> 
+  # Zeilen ohne Fehlerwerte löschen
+  drop_na(errglm_gamma) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errglm_gamma)) +
+  # Boxplot
   geom_boxplot(aes(fill = StratumName)) +
-  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftung, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{glm})^2}$)")+
   theme_bw() +
   theme(legend.position="none")
+
 # Export als SVG
 saveAsSVG(plot_glmError, "glm/glmError.svg")
-saveAsSVG((plot_glmPrediction|plot_glmError), "glm/glm_page.svg")
+# Export als Kombination von Vorhersage und Fehler
+saveAsSVG((plot_glmPrediction | plot_glmError), "glm/glm_page.svg")
 ```
 
-# Automatisierte Selektion eines generalisierten Modells
+# Autom. Modellselektion (GLM)
 
 ## Modellerstellung
+
 ```{r}
 # Mögliche GLMs nach Güte untersuchen und ordnen
-resglm = glmulti(glm_gamma, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+resglm = glmulti(glm_gamma, level = 1, method = "h", confsetsize = 8, 
+                 crit = "AIC")
 # Das beste Modell übernehmen
 bestglm = resglm@objects[[1]]
-# Vorhersage
-bestglm_pred = BCTransformInverse(predict(bestglm, newdata = predictors), lambda = lambda)
+# Vorhersage mit Rücktransformation
+bestglm_pred = BCTransformInverse(predict(bestglm, newdata = predictors), 
+                                  lambda = lambda)
 # Speichern und Fehlerberechnung
-data = pred(name = "bestglm", predictions = bestglm_pred, data = data, response = response)
+data = pred(name = "bestglm", predictions = bestglm_pred, data = data, 
+            response = response)
 ```
 
 ## Modellbewertung
@@ -549,12 +676,12 @@ summary(bestglm)
 # AIC des besten GLMs
 resglm@crits[1]
 # AICs der ersten 8 Modelle
-plot(resglm)
 mean(resglm@crits)
+plot(resglm)
 
 # Varianz
-var(yobs = data[!is.na(data$bestglm), response], 
-    ymod = na.omit(data$bestglm))
+var(yobs = data[!is.na(data$bestglm), response], ymod = na.omit(data$bestglm))
+
 # RMSE
 rmse(actual = data[!is.na(data$bestglm), response], 
      predicted = data[!is.na(data$bestglm), "bestglm"])
@@ -568,66 +695,91 @@ text(x= 37, y= 0.12,label = "mean = 0,021", pos = 4,cex = 0.8)
 text(x= 37, y= 0.11,label = "min = 9,41e-05", pos = 4, cex = 0.8)
 dev.off()}
 
-max(cooks.distance(bestglm)) #0.1523492
-min(cooks.distance(bestglm)) #9.41153e-05
-mean(cooks.distance(bestglm)) #0.02075966
+max(cooks.distance(bestglm))
+# => 0.1523492
+min(cooks.distance(bestglm))
+# => 9.41153e-05
+mean(cooks.distance(bestglm))
+# => 0.02075966
 
-#ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
+# ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errbestglm~ data$StratumName) 
 # => p-value = 0.305: Varianzen gleich
 results = aov(data$errbestglm~data$StratumName)
 summary(results)
-# p-value = 0.123 Ergebnis nicht signifikant, Vorhersagen unterscheiden sich nicht
+# => p-value = 0.123: Ergebnis nicht signifikant.
+# Vorhersagen unterscheiden sich nicht
 ```
 
 ## Visualisierung 
 
 ```{r}
 # Vorhersage bestes GLM
-plot_glmAutoPrediction = ggplot(data |> drop_na(bestglm), aes(x = Bodenfeuchte_Prozent, y = bestglm)) +
+plot_glmAutoPrediction = data |> 
+  # Zeilen ohne Vorhersage des besten GLMs löschen
+  drop_na(bestglm) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = bestglm)) +
+  # Scatterplot
   geom_point(aes(col = StratumName)) +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_color_manual(values = colouring) +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftung und theme
   labs(x = r"($y$)", y = r"($y_{glmAuto}$)", colour = "Stratum")+
-  geom_abline(slope = 1) + annotate("text", x = 52, y = 25, label = "y = 1x") +
+  annotate("text", x = 52, y = 25, label = "y = 1x") +
   theme_bw()
+
 # Export als SVG
 saveAsSVG(plot_glmAutoPrediction, "glmAuto/glmAutoPrediction.svg")
 
 # Fehler ~ Stratum
-plot_glmAutoError = ggplot(data |> drop_na(errbestglm), aes(x = StratumName, y = errbestglm)) +
+plot_glmAutoError = data |> 
+  # Zeilen ohne Fehlerangabe löschen
+  drop_na(errbestglm) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errbestglm)) +
+  # Boxplot
   geom_boxplot(aes(fill = StratumName)) +
-  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftung, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{glmAuto})^2}$)")+
   theme_bw() +
   theme(legend.position="none")
+
 # Export als SVG
 saveAsSVG(plot_glmAutoError, "glmAuto/glmAutoError.svg")
-saveAsSVG((plot_glmAutoPrediction|plot_glmAutoError), "glmAuto/glmAuto_page.svg")
+# Export der kombinierten plots
+saveAsSVG((plot_glmAutoPrediction|plot_glmAutoError), 
+          "glmAuto/glmAuto_page.svg")
 ```
 
-# Visualisierung Vergleich lineare Modelle
+# Vergleich lineare Modelle
 
 ```{r}
-data |> 
-  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+# Scatterplot mit allen Vorhersagen
+scatterLinPreds = data |> 
+  # Dataframe umgestalten. Spalte mit modelltypen hinzufügen.
   pivot_longer(cols=c("linModel", 
                       "bestlinModel", 
                       "glm_gamma", 
                       "bestglm"), 
-               names_to='Modeltype', values_to='predictions') |>
-  # Entfernen von Zeilen mit NAs in der Error-Spalte
+               names_to='Modeltype', 
+               values_to='predictions') |>
+  # Entfernen von Zeilen ohne Fehlerangaben
   drop_na(predictions) |>
-  # ggplot
+  # ggplot initialisieren
   ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
-  # Plot Elemente
+  # Scatterplot
   geom_point(aes(color = Modeltype)) + 
-  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
-  # Beschriftung
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftungen und theme
   labs(x = "Messwerte", y = "Vorhersage") +
-  # Theme
+  annotate("text", x = 13, y = 7, label = "y = 1x") +
   theme_bw()
 
-
+# Boxplot mit Fehlern nach Modell
 vergLinModels = data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", 
@@ -635,28 +787,31 @@ vergLinModels = data |>
                       "errglm_gamma",
                       "errbestglm",
                       ), 
-               names_to='Modeltype', values_to='RootsquaredError') |>
+               names_to='Modeltype', 
+               values_to='RootSquaredError') |>
+  # Entfernen von Zeilen ohne Fehlerangaben
+  drop_na(RootSquaredError) |>
+  # Umbenennung der Modelltypen
   mutate(Modeltype = case_when(
     Modeltype == "errlinModel" ~ r"((1) $linModel$)",
     Modeltype == "errbestlinModel" ~ r"((2) $linModelAuto$)",
     Modeltype == "errglm_gamma" ~ r"((3) $glm$)",
     Modeltype == "errbestglm" ~ r"((4) $glmAuto$)"
     )) |>
-  # Entfernen von Zeilen mit NAs in der Error-Spalte
-  drop_na(RootsquaredError) |>
-  # ggplot
-  ggplot(aes(x = Modeltype, y = RootsquaredError)) + 
-  # Plot-Elemente
+  # ggplot initialisieren
+  ggplot(aes(x = Modeltype, y = RootSquaredError)) + 
+  # Boxplot
   geom_boxplot() + 
-  # Beschriftung
+  # Beschriftung, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{...})^2}$)", fill = "Modelltyp") +
-  scale_fill_discrete(labels = c("Selektiertes GLM", "Selektiertes LM", "GLM", "LM"))+
-  # Theme
   theme_bw()
+# Export als SVG Vektorgrafik
 saveAsSVG(vergLinModels, "diskussion/vergleichLineareModelle.svg")
 ```
 
 # CART
+
+## Modellerstellung
 
 ```{r}
 # Baum erstellen
@@ -665,46 +820,66 @@ treeModel <- rpart(Bodenfeuchte_Prozent ~ ., data = modeldata)
 data = pred(name = "treeModel", model = treeModel, 
             predictors = predictors, data = data, 
             response = response)
-# Baumplot
-treePlot = rpart.plot(treeModel, digits = 4)
 ```
 
+## Modellbewertung
+
+## Visualisierung
 
 ```{r}
-# Stufen
-treeLine = modeldata %>%
-  mutate(pred = predict(treeModel, modeldata), StratumName = data$StratumName[as.numeric(rownames(modeldata))]) %>%
+# Baumplot
+treePlot = rpart.plot(treeModel, digits = 4)
+
+# Stufen plot in Eingabedaten
+treeLine = data |>
+  # Zeilen ohne Vorhersagewerte löschen
+  drop_na(treeModel) |>
+  # ggplot initialisieren
   ggplot(aes(x = Gelaendehoehe_m, y = Bodenfeuchte_Prozent)) +
-  #geom_point(alpha = .2, size = 1, aes(col = StratumName)) +
+  # Scatterplot
   geom_point(aes(col = StratumName)) +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3), name = "Stratum") +
-  geom_line(aes(y = pred), color = "red", size = .75) +
+  scale_color_manual(values = colouring, name = "Stratum") +
+  # Stufenlinie hinzufügen
+  geom_line(aes(y = treeModel), color = "red", size = .75) +
+  # BEschriftungen, Layout und theme
   labs(x = "Geländehoehe [m]", y = "Bodenfeuchte [%]") +
   theme_bw() +
   theme(legend.position = "none")
 
+# Vorhersageplot für tree
 treePred = data  |> 
+  # Zeilen ohne Vorhersagewerte löschen
   drop_na(treeModel) |>
-  ggplot(aes(x = Bodenfeuchte_Prozent, y = treeModel, col = StratumName)) +
-  geom_point() +
-  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3), name = "Stratum") +
-  guides(color = guide_legend(nrow = 1)) +
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = treeModel)) +
+  # Scatterplot
+  geom_point(aes(col = StratumName)) +
+  scale_color_manual(values = colouring, name = "Stratum") +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftung, Layout und theme
   labs(x = r"($y$)", y = r"($y_{tree}$)") +
-  geom_abline(slope = 1) + annotate("text", x = 60, y = 40, label = "y = 1x") +
+  annotate("text", x = 60, y = 40, label = "y = 1x") +
   theme_bw() +
   theme(legend.position = "bottom")
 
-plot_treeError = ggplot(data |> drop_na(errtreeModel), aes(x = StratumName, y = errtreeModel)) +
+# Fehler des tree über die drei Straten
+plot_treeError = data |> 
+  # Zeilen ohne Vorhersagewerte löschen
+  drop_na(errtreeModel) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errtreeModel)) +
+  # Boxplot
   geom_boxplot(aes(fill = StratumName)) +
-  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftung, Layout und theme
   labs(x = "($y$)", y = r"($\sqrt{(y-y_{tree})^2}$)")+
-  theme_bw() +
   scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  theme_bw() +
   theme(legend.position="none", rect = element_rect(fill = "transparent"))
 
-
-ptree = (treeLine|treePred|plot_treeError)
-saveAsSVG(ptree, "CART/tree_page.svg")
+# Export als dreierkombi SVG
+saveAsSVG((treeLine | treePred | plot_treeError), "CART/tree_page.svg")
 ```
 
 # Random Forest
@@ -713,32 +888,36 @@ saveAsSVG(ptree, "CART/tree_page.svg")
 # Wald anlegen
 randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata)
 
-# OOB-INB Geschichte
-oob = predict(randomForest)
-data = pred(name = "OOB", predictions = oob, data = data, response = response)
-
+# INB Vorhersage
 inb = predict(randomForest, newdata = predictors)
 data = pred(name = "INB", predictions = inb, data = data, response = response)
 
+# OOB-Score
+oob = predict(randomForest)
+data = pred(name = "OOB", predictions = oob, data = data, response = response)
+
+# Varianz
 var(yobs = data[!is.na(data$OOB), response], ymod = na.omit(data$OOB))
 var(yobs = data[!is.na(data$INB), response], ymod = na.omit(data$INB))
 
 data |> 
-  # Dataframe umgestalten. Spalte mit OOB/INB hinzufügen.
-  pivot_longer(cols=c("OOB", "INB"), names_to='Vorhersagetyp', 
-               values_to='Prediction') |>
+  # Spalte mit OOB/INB hinzufügen.
+  pivot_longer(cols=c("OOB", "INB"), 
+               names_to='Vorhersagetyp', 
+               values_to='Vorhersage') |>
   # Zeilen ohne vorhersagewerte löschen
-  drop_na(Prediction) |>
-  # ggplot
-  ggplot(aes(x = Bodenfeuchte_Prozent, y = Prediction, col = Vorhersagetyp)) +
-  geom_point() +
+  drop_na(Vorhersage) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = Vorhersage)) +
+  # Scatterplot
+  geom_point(aes(col = Vorhersagetyp)) +
   scale_color_manual(values = c("palegreen4", "palegreen2")) +
+  # Theme
   theme_bw()
 
 # Variableneinfluss
-importance = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata, 
-                          importance = TRUE)
-varImpPlot(importance, type = "1")
+varImpPlot(randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata, 
+                          importance = TRUE), type = "1")
 ```
 
 # Diskussion
@@ -749,6 +928,28 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 
 ```{r}
 data |> 
+  # Spalte mit alllen 6 Modelltypen hinzufügen
+  pivot_longer(cols=c("errlinModel", 
+                      "errbestlinModel",
+                      "errglm_gamma",
+                      "errbestglm",
+                      "errtreeModel", 
+                      "errINB"
+                      ), 
+               names_to='Modeltype', 
+               values_to='RootSquaredError') |>
+  # Entfernen von Zeilen ohne Fehlerwerte
+  drop_na(RootSquaredError) |>
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = RootSquaredError)) + 
+  # Plot-Elemente
+  geom_boxplot(aes(fill = Modeltype)) + 
+  # Beschriftung und theme
+  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
+  theme_bw()
+
+# Boxplot mit Fehlern nach Modell für alle Modelle
+vergAllModels = data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", 
                       "errbestlinModel",
@@ -757,24 +958,29 @@ data |>
                       "errtreeModel", 
                       "errINB"
                       ), 
-               names_to='Modeltype', values_to='RootsquaredError') |>
-  # Entfernen von Zeilen mit NAs in der Error-Spalte
-  drop_na(RootsquaredError) |>
-  # ggplot
-  ggplot(aes(x = StratumName, y = RootsquaredError, fill = Modeltype)) + 
-  # Plot-Elemente
+               names_to='Modeltype', 
+               values_to='RootSquaredError') |>
+  # Entfernen von Zeilen ohne Fehlerangaben
+  drop_na(RootSquaredError) |>
+  # Umbenennung der Modelltypen
+  mutate(Modeltype = case_when(
+    Modeltype == "errlinModel" ~ r"((1) $linModel$)",
+    Modeltype == "errbestlinModel" ~ r"((2) $linModelAuto$)",
+    Modeltype == "errglm_gamma" ~ r"((3) $glm$)",
+    Modeltype == "errbestglm" ~ r"((4) $glmAuto$)",
+    Modeltype == "errtreeModel" ~ r"((5) $tree$)",
+    Modeltype == "errINB" ~ r"((6) $rf$)"
+    )) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Modeltype, y = RootSquaredError)) + 
+  # Boxplot
   geom_boxplot() + 
-  # Beschriftung
-  labs(x = "", y = "Wurzel aus Fehlerquadratsumme", fill = "Modelltyp") +
-  # Theme
+  # Beschriftung, Layout und theme
+  labs(x = "", y = r"($\sqrt{(y-y_{...})^2}$)", fill = "Modelltyp") +
   theme_bw()
 
-{
-par(mar = c(4, 8, 2, 0.5))
-boxplot(data[,c("errlinModel", "errbestlinModel", "errglm_gamma", 
-                "errbestglm","errtreeModel", "errINB")], las = 1, 
-        horizontal = TRUE, xlab = "Fehlerquadrate")
-}
+# Export als SVG
+saveAsSVG(vergAllModels, "diskussion/VergleichAlleModelle.svg")
 ```
 
 Vergleich der Abweichung von der Diagonalen.
@@ -785,39 +991,23 @@ data |>
   pivot_longer(cols=c("linModel", 
                       "bestlinModel", 
                       "glm_gamma", 
+                      "bestglm",
                       "treeModel", 
-                      "INB", 
-                      "bestglm"), 
-               names_to='Modeltype', values_to='predictions') |>
-  # Entfernen von Zeilen mit NAs in der Error-Spalte
-  drop_na(predictions) |>
-  # ggplot
-  ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
-  # Plot Elemente
-  geom_point(aes(color = Modeltype)) + 
-  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
-  # Beschriftung
+                      "INB"
+                      ), 
+               names_to='Modeltyp', 
+               values_to='Vorhersage') |>
+  # Entfernen von Zeilen ohne angabe von Fehlern
+  drop_na(Vorhersage) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = Vorhersage)) + 
+  # Scatterplot
+  geom_point(aes(color = Modeltyp)) + 
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftungen und theme
   labs(x = "Messwerte", y = "Vorhersage") +
-  # Theme
-  theme_bw()
-```
-
-```{r}
-data |> 
-  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
-  pivot_longer(cols=c( "bestlinModel", 
-                       "bestglm"), 
-               names_to='Modeltype', values_to='predictions') |>
-  # Entfernen von Zeilen mit NAs in der Error-Spalte
-  drop_na(predictions) |>
-  # ggplot
-  ggplot(aes(x = Bodenfeuchte_Prozent, y = predictions, colour = Modeltype)) + 
-  # Plot Elemente
-  geom_point(aes(color = Modeltype)) + 
-  geom_abline(slope = 1) + annotate("text", x = 13, y = 7, label = "y = 1x") +
-  # Beschriftung
-  labs(x = "Messwerte", y = "Vorhersage") +
-  # Theme
+  annotate("text", x = 13, y = 7, label = "y = 1x") +
   theme_bw()
 ```
 
@@ -826,7 +1016,7 @@ data |>
 ```{r, warning=FALSE}
 # Abspeichern des data-Dataframes als csv-Datei
 write.csv(data, file.path("Data", "DATA.csv"))
-# Abspeichern des data-DAtaframes als shape-Datei
+# Abspeichern des data-Dataframes als shape-Datei
 write_sf(sf(data), file.path("shapefiles", "points.shp"), delete_layer = TRUE)
 ```
 
