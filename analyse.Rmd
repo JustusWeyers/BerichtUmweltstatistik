@@ -137,10 +137,21 @@ BCTransformInverse <- function(yt, lambda=0) {
     if (lambda == 0L) { exp(yt) }
     else { exp(log(1 + lambda * yt)/lambda) }
 }
+
+# Funktion zum Anlegen von Ordnern einer Datei
+mk = function(name) {
+  targetdir = dirname(file.path(getwd(), imgpath, name))
+  if (!file.exists(targetdir)) dir.create(targetdir, recursive = TRUE)
+  return(file.path(targetdir, basename(name)))
+}
+
 # Funktion um Plots als SVG zu speichern
-saveAsSVG = function(plot, name, h = 7) {
-  plot |> ggsave(filename = file.path(imgpath, name), 
-                 width = 15.5, height = h, units = "cm")
+saveAsSVG = function(plot, name, h = 7, w = 15.5) {
+  # Eventuell Ordner anlegen
+  mk(name)
+  # Abspeichern als Vektorgrafik
+  plot |> ggsave(filename = file.path(imgpath, name),
+                 width = w, height = h, units = "cm")
 }
 ```
 
@@ -358,9 +369,9 @@ summary(bestlinModel)
 
 # AIC des besten linearen Modells
 res@crits[1]
-# AICs der ersten 8 Modelle
-svg(paste0(imgpath, "linModelAuto/AICs.svg"), width = 15.5, height = 7);plot(res);dev.off()
 mean(res@crits)
+# AICs der ersten 8 Modelle
+svg(mk("linModelAuto/AICs.svg"));plot(res);dev.off()
 
 # Varianz
 var(yobs = data[!is.na(data$bestlinModel), response], 
@@ -470,7 +481,7 @@ var(yobs = data[!is.na(data$glm_gamma), response],
     ymod = na.omit(data$glm_gamma))
 
 #Cook´s Distance
-{svg(file.path(imgpath, "glm/glm_cooksdistance.svg"), width = 15.5, height = 7)
+{svg(mk("glm/glm_cooksdistance.svg"), width = 15.5, height = 7)
 plot(glm_gamma, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cook´sche Distanz")
 text(x= 33, y= 0.09,label = "max = 0,101", pos = 4, cex = 0.8)
@@ -549,7 +560,7 @@ rmse(actual = data[!is.na(data$bestglm), response],
      predicted = data[!is.na(data$bestglm), "bestglm"])
 
 #Cook´s Distance
-{svg(file.path(imgpath, "glmAuto/glmAuto_cooksdistance.svg"), width = 15.5, height = 7)
+{svg(mk("glmAuto/glmAuto_cooksdistance.svg"), width = 15.5, height = 7)
 plot(bestglm, 4, main = "", xaxt = "n", ann = F)
 title(xlab="Datenpunkt", ylab ="Cooksche Distanz")
 text(x= 37, y= 0.13,label = "max = 0,152", pos = 4, cex = 0.8)
