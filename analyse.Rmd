@@ -560,14 +560,11 @@ data = pred(name = "glm_gamma", predictions = glm_gamma_predictions,
 ## Modellbewertung
 
 ```{r}
+# Modellbericht
 summary(glm_gamma)
-plot(glm_gamma)
+# Default plots
+# plot(glm_gamma)
 
-```
-
-## Modellbewertung
-
-```{r}
 # Beschreibung des GLMs
 summary(glm_gamma)
 
@@ -1019,4 +1016,3 @@ write.csv(data, file.path("Data", "DATA.csv"))
 # Abspeichern des data-Dataframes als shape-Datei
 write_sf(sf(data), file.path("shapefiles", "points.shp"), delete_layer = TRUE)
 ```
-
