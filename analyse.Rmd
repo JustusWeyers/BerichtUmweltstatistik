@@ -406,7 +406,6 @@ saveAsSVG(plot_linModelAutoError, "linModelAuto/linModelAutoError.svg")
 saveAsSVG((plot_linModelAutoPrediction|plot_linModelAutoError), "linModelAuto/linModelAuto_page.svg")
 
 # Wichtigkeit von Prädiktoren
-plot.glmulti(res, type = "s")
 imp = data.frame(importance = getImportance(res))
 impplot = imp |> 
   ggplot(aes(x = importance, y = reorder(rownames(imp), importance))) +
@@ -656,25 +655,45 @@ data = pred(name = "treeModel", model = treeModel,
             predictors = predictors, data = data, 
             response = response)
 # Baumplot
-rpart.plot(treeModel, digits = 4)
+treePlot = rpart.plot(treeModel, digits = 4)
+```
 
+
+```{r}
 # Stufen
-modeldata %>%
-  mutate(pred = predict(treeModel, modeldata)) %>%
-  ggplot(aes(Gelaendehoehe_m, Bodenfeuchte_Prozent)) +
-  geom_point(alpha = .2, size = 1) +
-  geom_point(aes(Gelaendehoehe_m, y = Bodenfeuchte_Prozent), color = "blue", size = .75) +
+treeLine = modeldata %>%
+  mutate(pred = predict(treeModel, modeldata), StratumName = data$StratumName[as.numeric(rownames(modeldata))]) %>%
+  ggplot(aes(x = Gelaendehoehe_m, y = Bodenfeuchte_Prozent)) +
+  #geom_point(alpha = .2, size = 1, aes(col = StratumName)) +
+  geom_point(aes(col = StratumName)) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3), name = "Stratum") +
   geom_line(aes(y = pred), color = "red", size = .75) +
   labs(x = "Geländehoehe [m]", y = "Bodenfeuchte [%]") +
-  theme_bw()
+  theme_bw() +
+  theme(legend.position = "none")
 
-data  |> 
+treePred = data  |> 
   drop_na(treeModel) |>
-  ggplot(aes(x = Bodenfeuchte_Prozent, y = treeModel, col = Gelaendehoehe_m)) +
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = treeModel, col = StratumName)) +
   geom_point() +
-  labs(x = "Messwerte Bodenfeuchte [%]", y = "Vorhersage Entscheidungsbaum") +
-  scale_color_continuous(name = "Geländehöhe [m]", low = "forestgreen", high = "burlywood2") +
-  theme_bw()
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 3), name = "Stratum") +
+  guides(color = guide_legend(nrow = 1)) +
+  labs(x = r"($y$)", y = r"($y_{tree}$)") +
+  geom_abline(slope = 1) + annotate("text", x = 60, y = 40, label = "y = 1x") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+plot_treeError = ggplot(data |> drop_na(errtreeModel), aes(x = StratumName, y = errtreeModel)) +
+  geom_boxplot(aes(fill = StratumName)) +
+  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 3)) +
+  labs(x = "($y$)", y = r"($\sqrt{(y-y_{tree})^2}$)")+
+  theme_bw() +
+  scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  theme(legend.position="none", rect = element_rect(fill = "transparent"))
+
+
+ptree = (treeLine|treePred|plot_treeError)
+saveAsSVG(ptree, "CART/tree_page.svg")
 ```
 
 # Random Forest
