@@ -2,7 +2,7 @@
 *.Rhistory
 *.RData
 *.svg
-*.dbf
+*points.dbf
 
 Data/DATA.csv
 
