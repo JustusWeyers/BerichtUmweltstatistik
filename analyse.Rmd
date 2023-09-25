@@ -867,16 +867,18 @@ plot_treeError = data |>
   geom_boxplot(aes(fill = StratumName)) +
   scale_fill_manual(values = colouring) +
   # Beschriftung, Layout und theme
-  labs(x = "($y$)", y = r"($\sqrt{(y-y_{tree})^2}$)")+
+  labs(x = "($y$)", y = r"($\sqrt{(y-y_{cart})^2}$)")+
   scale_x_discrete(guide = guide_axis(n.dodge=2)) +
   theme_bw() +
   theme(legend.position="none", rect = element_rect(fill = "transparent"))
 
 # Export als dreierkombi SVG
-saveAsSVG((treeLine | treePred | plot_treeError), "CART/tree_page.svg")
+saveAsSVG((treeLine | treePred | plot_treeError), "CART/cart_page.svg")
 ```
 
 # Random Forest
+
+## Modellerstellung
 
 ```{r}
 # Wald anlegen
@@ -886,33 +888,119 @@ randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata)
 inb = predict(randomForest, newdata = predictors)
 data = pred(name = "INB", predictions = inb, data = data, response = response)
 
-# OOB-Score
+# OOB Vorhersage
 oob = predict(randomForest)
 data = pred(name = "OOB", predictions = oob, data = data, response = response)
+```
+
+## Modellberwertung
+
+```{r}
+randomForest
 
 # Varianz
 var(yobs = data[!is.na(data$OOB), response], ymod = na.omit(data$OOB))
 var(yobs = data[!is.na(data$INB), response], ymod = na.omit(data$INB))
 
+rmse(data$Bodenfeuchte_Prozent[!is.na(data$OOB)], na.omit(data$OOB))
+```
+
+## Visualisierung
+
+```{r}
+# Quadrierte Fehler im RF
+{svg(mk("RF/rfs.svg"), width = 15.5, height = 7)
+plot(randomForest)
+dev.off()}
+
+
+oobinbplot = 
 data |> 
   # Spalte mit OOB/INB hinzufügen.
   pivot_longer(cols=c("OOB", "INB"), 
                names_to='Vorhersagetyp', 
                values_to='Vorhersage') |>
+  mutate(Vorhersagetyp = case_when(
+    Vorhersagetyp == "INB" ~ "Normal",
+    Vorhersagetyp == "OOB" ~ "Out-of-bag")) |>
   # Zeilen ohne vorhersagewerte löschen
   drop_na(Vorhersage) |>
   # ggplot initialisieren
   ggplot(aes(x = Bodenfeuchte_Prozent, y = Vorhersage)) +
   # Scatterplot
-  geom_point(aes(col = Vorhersagetyp)) +
-  scale_color_manual(values = c("palegreen4", "palegreen2")) +
+  geom_point(aes(alpha = Vorhersagetyp)) +
+  #scale_color_manual(values = c("grey20", "grey80")) +
+  labs(x = r"($y$)", y = r"($y_RF$)") +
   # Theme
   theme_bw()
 
+saveAsSVG(oobinbplot, "RF/OOBINBPlot.svg")
+
 # Variableneinfluss
+{svg(mk("RF/varImportance.svg"), width = 15.5, height = 7)
 varImpPlot(randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata, 
-                          importance = TRUE), type = "1")
+                        importance = TRUE), type = "1")
+dev.off()}
 ```
+
+# Tuned RF
+
+## Modellerstellung
+
+```{r}
+tunedRF = tuneRF(x = predictors, y=modeldata$Bodenfeuchte_Prozent, doBest=TRUE, 
+                 ntreeTry=5000, plot = TRUE)
+tunedPrediction = predict(tunedRF, newdata = predictors)
+data = pred(name = "tunedRF", predictions = tunedPrediction, data = data, 
+            response = response)
+```
+
+## Modellbewertung
+
+```{r}
+tunedRF
+```
+
+## Visualisierung
+
+```{r}
+# Vorhersageplot für tree
+tunedRFplot = data  |> 
+  # Zeilen ohne Vorhersagewerte löschen
+  drop_na(tunedRF) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Bodenfeuchte_Prozent, y = tunedRF)) +
+  # Scatterplot
+  geom_point(aes(col = StratumName)) +
+  scale_color_manual(values = colouring, name = "Stratum") +
+  # Ursprungsgerade mit Steigung 1
+  geom_abline(slope = 1) + 
+  # Beschriftung, Layout und theme
+  labs(x = r"($y$)", y = r"($y_{tree}$)") +
+  annotate("text", x = 60, y = 40, label = "y = 1x") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+# Fehler des tree über die drei Straten
+tunedRF_Error = data |> 
+  # Zeilen ohne Vorhersagewerte löschen
+  drop_na(errtunedRF) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errtunedRF)) +
+  # Boxplot
+  geom_boxplot(aes(fill = StratumName)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftung, Layout und theme
+  labs(x = "($y$)", y = r"($\sqrt{(y-y_{tunedRF})^2}$)")+
+  scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  theme_bw() +
+  theme(legend.position="none", rect = element_rect(fill = "transparent"))
+
+
+# Export als dreierkombi SVG
+saveAsSVG((tunedRFplot | tunedRF_Error), "tunedRF/tunedRF_page.svg")
+```
+
 
 # Diskussion
 
@@ -922,13 +1010,14 @@ Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 
 ```{r}
 data |> 
-  # Spalte mit alllen 6 Modelltypen hinzufügen
+  # Spalte mit allen 6 Modelltypen hinzufügen
   pivot_longer(cols=c("errlinModel", 
                       "errbestlinModel",
                       "errglm_gamma",
                       "errbestglm",
                       "errtreeModel", 
-                      "errINB"
+                      "errINB",
+                      "errtunedRF"
                       ), 
                names_to='Modeltype', 
                values_to='RootSquaredError') |>
@@ -950,7 +1039,8 @@ vergAllModels = data |>
                       "errglm_gamma",
                       "errbestglm",
                       "errtreeModel", 
-                      "errINB"
+                      "errINB",
+                      "errtunedRF"
                       ), 
                names_to='Modeltype', 
                values_to='RootSquaredError') |>
@@ -962,8 +1052,9 @@ vergAllModels = data |>
     Modeltype == "errbestlinModel" ~ r"((2) $linModelAuto$)",
     Modeltype == "errglm_gamma" ~ r"((3) $glm$)",
     Modeltype == "errbestglm" ~ r"((4) $glmAuto$)",
-    Modeltype == "errtreeModel" ~ r"((5) $tree$)",
-    Modeltype == "errINB" ~ r"((6) $rf$)"
+    Modeltype == "errtreeModel" ~ r"((5) $cart$)",
+    Modeltype == "errINB" ~ r"((6) $RF$)",
+    Modeltype == "errtunedRF" ~ r"((t) $tunedRF$)"
     )) |>
   # ggplot initialisieren
   ggplot(aes(x = Modeltype, y = RootSquaredError)) + 
