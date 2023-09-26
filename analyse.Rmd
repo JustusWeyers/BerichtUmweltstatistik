@@ -20,8 +20,6 @@ library(tidyverse)
 library(GGally)
 library(corrplot)
 library(patchwork)
-# Obacht, neu:
-# install.packages("wesanderson")
 library(wesanderson)
 
 # Statistik
@@ -56,7 +54,7 @@ set.seed(1)
 # Interaktive Kartenansicht
 tmap::tmap_mode("view")
 # Farbauswahl - https://github.com/karthik/wesanderson
-colouring = wes_palette("Cavalcanti1", n = 3)
+colouring = c("#D8B70A", "#05612a", "#A2A475") # wes_palette("Cavalcanti1", n = 3)
 ```
 
 ## Funktionsdefinitionen
@@ -217,6 +215,8 @@ data = data %>%
 modeldata = data |> 
   select(all_of(c(predicts, response))) |> 
   na.omit()
+
+modeldata_scaled = apply(X = modeldata, FUN = scale, MARGIN = 2)
 
 # Prädiktoren selektieren
 predictors = modeldata |> 
@@ -405,6 +405,7 @@ saveAsSVG(normdist, "linModel/linModel_ResidualsDensity.svg")
 ```{r}
 # Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
+res_scaled = glmulti(lm(Bodenfeuchte_Prozent ~ ., data = modeldata), level = 1, method = "h", confsetsize = 8, crit = "AIC")
 # Das beste Modell übernehmen
 bestlinModel = res@objects[[1]]
 # Vorhersage und Fehler speichern
@@ -436,6 +437,7 @@ rmse(actual = data[!is.na(data$bestlinModel), response],
 
 # Wichtigkeit von Prädiktoren
 imp = data.frame(importance = getImportance(res))
+plot(res, type = "s")
 
 #ANOVA für Testung, ob sich Vorhersagen für Straten unterscheiden
 bartlett.test(data$errbestlinModel~ data$StratumName) 
@@ -817,6 +819,11 @@ data = pred(name = "treeModel", model = treeModel,
 ```
 
 ## Modellbewertung
+```{r}
+treeModel
+rmse(data$Bodenfeuchte_Prozent[!is.na(data$treeModel)], na.omit(data$treeModel))
+```
+
 
 ## Visualisierung
 
@@ -867,7 +874,7 @@ plot_treeError = data |>
   geom_boxplot(aes(fill = StratumName)) +
   scale_fill_manual(values = colouring) +
   # Beschriftung, Layout und theme
-  labs(x = "($y$)", y = r"($\sqrt{(y-y_{cart})^2}$)")+
+  labs(x = r"($y$)", y = r"($\sqrt{(y-y_{cart})^2}$)")+
   scale_x_discrete(guide = guide_axis(n.dodge=2)) +
   theme_bw() +
   theme(legend.position="none", rect = element_rect(fill = "transparent"))
@@ -903,6 +910,7 @@ var(yobs = data[!is.na(data$OOB), response], ymod = na.omit(data$OOB))
 var(yobs = data[!is.na(data$INB), response], ymod = na.omit(data$INB))
 
 rmse(data$Bodenfeuchte_Prozent[!is.na(data$OOB)], na.omit(data$OOB))
+rmse(data$Bodenfeuchte_Prozent[!is.na(data$INB)], na.omit(data$INB))
 ```
 
 ## Visualisierung
@@ -913,9 +921,7 @@ rmse(data$Bodenfeuchte_Prozent[!is.na(data$OOB)], na.omit(data$OOB))
 plot(randomForest)
 dev.off()}
 
-
-oobinbplot = 
-data |> 
+RFplot= data |> 
   # Spalte mit OOB/INB hinzufügen.
   pivot_longer(cols=c("OOB", "INB"), 
                names_to='Vorhersagetyp', 
@@ -928,13 +934,33 @@ data |>
   # ggplot initialisieren
   ggplot(aes(x = Bodenfeuchte_Prozent, y = Vorhersage)) +
   # Scatterplot
-  geom_point(aes(alpha = Vorhersagetyp)) +
-  #scale_color_manual(values = c("grey20", "grey80")) +
-  labs(x = r"($y$)", y = r"($y_RF$)") +
+  geom_point(aes(alpha = Vorhersagetyp, col = StratumName)) +
+  scale_color_manual(values = colouring) +
+  scale_alpha_discrete(range = c(1.0, 0.17), guide = 'none') +
+  geom_abline(slope = 1) + 
+  annotate("text", x = 60, y = 40, label = "y = 1x") +
+  labs(x = r"($y$)", y = r"($y_{RF}$)") +
   # Theme
   theme_bw()
 
-saveAsSVG(oobinbplot, "RF/OOBINBPlot.svg")
+saveAsSVG(RFplot, "RF/RFplot.svg")
+
+RFplotError = data |> 
+  # Zeilen ohne Fehlerangabe löschen
+  drop_na(errINB) |> 
+  # ggplot initialisieren
+  ggplot(aes(x = StratumName, y = errINB)) +
+  # Boxplot
+  geom_boxplot(aes(fill = StratumName)) +
+  scale_fill_manual(values = colouring) +
+  # Beschriftung, Layout und theme
+  labs(x = "", y = r"($\sqrt{(y-y_{RF})^2}$)")+
+  theme_bw() +
+  theme(legend.position="none")
+
+saveAsSVG(RFplotError, "RF/RFplotError.svg")
+
+saveAsSVG((RFplot | RFplotError), "RF/RF_page.svg")
 
 # Variableneinfluss
 {svg(mk("RF/varImportance.svg"), width = 15.5, height = 7)
@@ -948,8 +974,11 @@ dev.off()}
 ## Modellerstellung
 
 ```{r}
+{svg(mk("tunedRF/mtry.svg"), width = 15.5, height = 7)
 tunedRF = tuneRF(x = predictors, y=modeldata$Bodenfeuchte_Prozent, doBest=TRUE, 
                  ntreeTry=5000, plot = TRUE)
+dev.off()}
+
 tunedPrediction = predict(tunedRF, newdata = predictors)
 data = pred(name = "tunedRF", predictions = tunedPrediction, data = data, 
             response = response)
@@ -959,11 +988,20 @@ data = pred(name = "tunedRF", predictions = tunedPrediction, data = data,
 
 ```{r}
 tunedRF
+
+rmse(data$Bodenfeuchte_Prozent[!is.na(data$tunedRF)],
+     na.omit(data$tunedRF))
+mean(data$errtunedRF, na.rm = TRUE)
+var(yobs = data[!is.na(data$INB), response], ymod = na.omit(data$INB))
 ```
 
 ## Visualisierung
 
 ```{r}
+{svg(mk("tunedRF/tunedRFrfs.svg"), width = 15.5, height = 7)
+plot(tunedRF)
+dev.off()}
+
 # Vorhersageplot für tree
 tunedRFplot = data  |> 
   # Zeilen ohne Vorhersagewerte löschen
@@ -976,10 +1014,9 @@ tunedRFplot = data  |>
   # Ursprungsgerade mit Steigung 1
   geom_abline(slope = 1) + 
   # Beschriftung, Layout und theme
-  labs(x = r"($y$)", y = r"($y_{tree}$)") +
+  labs(x = r"($y$)", y = r"($y_{tunedRF}$)") +
   annotate("text", x = 60, y = 40, label = "y = 1x") +
-  theme_bw() +
-  theme(legend.position = "bottom")
+  theme_bw()
 
 # Fehler des tree über die drei Straten
 tunedRF_Error = data |> 
@@ -991,7 +1028,7 @@ tunedRF_Error = data |>
   geom_boxplot(aes(fill = StratumName)) +
   scale_fill_manual(values = colouring) +
   # Beschriftung, Layout und theme
-  labs(x = "($y$)", y = r"($\sqrt{(y-y_{tunedRF})^2}$)")+
+  labs(x = r"($y$)", y = r"($\sqrt{(y-y_{tunedRF})^2}$)")+
   scale_x_discrete(guide = guide_axis(n.dodge=2)) +
   theme_bw() +
   theme(legend.position="none", rect = element_rect(fill = "transparent"))
@@ -1032,15 +1069,12 @@ data |>
   theme_bw()
 
 # Boxplot mit Fehlern nach Modell für alle Modelle
-vergAllModels = data |> 
+vergAllModels1 = data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("errlinModel", 
                       "errbestlinModel",
                       "errglm_gamma",
-                      "errbestglm",
-                      "errtreeModel", 
-                      "errINB",
-                      "errtunedRF"
+                      "errbestglm"
                       ), 
                names_to='Modeltype', 
                values_to='RootSquaredError') |>
@@ -1051,7 +1085,30 @@ vergAllModels = data |>
     Modeltype == "errlinModel" ~ r"((1) $linModel$)",
     Modeltype == "errbestlinModel" ~ r"((2) $linModelAuto$)",
     Modeltype == "errglm_gamma" ~ r"((3) $glm$)",
-    Modeltype == "errbestglm" ~ r"((4) $glmAuto$)",
+    Modeltype == "errbestglm" ~ r"((4) $glmAuto$)"
+    )) |>
+  # ggplot initialisieren
+  ggplot(aes(x = Modeltype, y = RootSquaredError)) + 
+  # Boxplot
+  geom_boxplot() + 
+  # Beschriftung, Layout und theme
+  labs(x = "", y = r"($\sqrt{(y-y_{...})^2}$)", fill = "Modelltyp") +
+  scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  ylim(0, 22) +
+  theme_bw()
+
+vergAllModels2 = data |> 
+  # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
+  pivot_longer(cols=c("errtreeModel", 
+                      "errINB",
+                      "errtunedRF"
+                      ), 
+               names_to='Modeltype', 
+               values_to='RootSquaredError') |>
+  # Entfernen von Zeilen ohne Fehlerangaben
+  drop_na(RootSquaredError) |>
+  # Umbenennung der Modelltypen
+  mutate(Modeltype = case_when(
     Modeltype == "errtreeModel" ~ r"((5) $cart$)",
     Modeltype == "errINB" ~ r"((6) $RF$)",
     Modeltype == "errtunedRF" ~ r"((t) $tunedRF$)"
@@ -1062,8 +1119,10 @@ vergAllModels = data |>
   geom_boxplot() + 
   # Beschriftung, Layout und theme
   labs(x = "", y = r"($\sqrt{(y-y_{...})^2}$)", fill = "Modelltyp") +
+  ylim(0, 22) +
   theme_bw()
 
+vergAllModels = (vergAllModels1|vergAllModels2)
 # Export als SVG
 saveAsSVG(vergAllModels, "diskussion/VergleichAlleModelle.svg")
 ```
