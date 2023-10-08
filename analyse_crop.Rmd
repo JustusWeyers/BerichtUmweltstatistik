@@ -1,3 +1,4 @@
+
 ---
 title: "Umweltstatistik Bericht - R"
 author: "Milena Mensching und Justus Weyers"
@@ -9,6 +10,7 @@ output:
     toc: yes
     toc_float: yes
 ---
+
 
 # Technisches
 
@@ -258,7 +260,7 @@ data = pred(name = "linModel", model = linModel, predictors = predictors,
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Default plots
 # plot(linModel)
 
@@ -296,7 +298,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Vorhersage Einfaches lineares Modell
 plot_linModelPrediction = data |> 
   # Zeilen ohne Vorhersagewert löschen
@@ -404,7 +406,7 @@ saveAsSVG(normdist, "linModel/linModel_ResidualsDensity.svg")
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Mögliche lineare Modelle nach Güte untersuchen und ordnen
 res = glmulti(linModel, level = 1, method = "h", confsetsize = 8, crit = "AIC")
 res_scaled = glmulti(lm(Bodenfeuchte_Prozent ~ ., data = modeldata), level = 1, method = "h", confsetsize = 8, crit = "AIC")
@@ -418,7 +420,7 @@ data = pred(name = "bestlinModel", model = bestlinModel, response = response,
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Beschreibung des besten Modells
 summary(bestlinModel)
 
@@ -452,7 +454,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Default Plots 
 # plot(bestlinModel)
 
@@ -533,7 +535,7 @@ mean(cooks.distance(bestlinModel))
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Arbeitskopie von 'modeldata' erstellen
 modeldata_transf = data.frame(modeldata)
 
@@ -563,7 +565,7 @@ data = pred(name = "glm_gamma", predictions = glm_gamma_predictions,
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Modellbericht
 summary(glm_gamma)
 # Default plots
@@ -607,7 +609,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Vorhersage GLM
 plot_glmPrediction = data |> 
   # Zeilen ohne GLM Vorhersagen löschen
@@ -651,7 +653,7 @@ saveAsSVG((plot_glmPrediction | plot_glmError), "glm/glm_page.svg")
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Mögliche GLMs nach Güte untersuchen und ordnen
 resglm = glmulti(glm_gamma, level = 1, method = "h", confsetsize = 8, 
                  crit = "AIC")
@@ -667,7 +669,7 @@ data = pred(name = "bestglm", predictions = bestglm_pred, data = data,
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Beschreibung des besten GLMs
 summary(bestglm)
 
@@ -709,9 +711,9 @@ summary(results)
 # Vorhersagen unterscheiden sich nicht
 ```
 
-## Visualisierung 
+## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Vorhersage bestes GLM
 plot_glmAutoPrediction = data |> 
   # Zeilen ohne Vorhersage des besten GLMs löschen
@@ -754,7 +756,7 @@ saveAsSVG((plot_glmAutoPrediction|plot_glmAutoError),
 
 # Vergleich lineare Modelle
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Scatterplot mit allen Vorhersagen
 scatterLinPreds = data |> 
   # Dataframe umgestalten. Spalte mit modelltypen hinzufügen.
@@ -811,7 +813,7 @@ saveAsSVG(vergLinModels, "diskussion/vergleichLineareModelle.svg")
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Baum erstellen
 treeModel <- rpart(Bodenfeuchte_Prozent ~ ., data = modeldata)
 # Vorhersage und Fehler speichern
@@ -821,7 +823,7 @@ data = pred(name = "treeModel", model = treeModel,
 ```
 
 ## Modellbewertung
-```{r}
+```{r, results='hide', fig.show='hide'}
 treeModel
 rmse(data$Bodenfeuchte_Prozent[!is.na(data$treeModel)], na.omit(data$treeModel))
 
@@ -837,7 +839,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Baumplot
 treePlot = rpart.plot(treeModel, digits = 4)
 
@@ -897,7 +899,7 @@ saveAsSVG((treeLine | treePred | plot_treeError), "CART/cart_page.svg")
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 # Wald anlegen
 randomForest = randomForest(Bodenfeuchte_Prozent ~ ., data = modeldata)
 
@@ -912,7 +914,7 @@ data = pred(name = "OOB", predictions = oob, data = data, response = response)
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 randomForest
 
 # Varianz
@@ -933,7 +935,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide', warning=FALSE}
 # Quadrierte Fehler im RF
 {svg(mk("RF/rfs.svg"), width = 15.5, height = 7)
 plot(randomForest)
@@ -991,7 +993,7 @@ dev.off()}
 
 ## Modellerstellung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 {svg(mk("tunedRF/mtry.svg"), width = 15.5, height = 7)
 tunedRF = tuneRF(x = predictors, y=modeldata$Bodenfeuchte_Prozent, doBest=TRUE, 
                  ntreeTry=5000, plot = TRUE)
@@ -1004,7 +1006,7 @@ data = pred(name = "tunedRF", predictions = tunedPrediction, data = data,
 
 ## Modellbewertung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 tunedRF
 
 rmse(data$Bodenfeuchte_Prozent[!is.na(data$tunedRF)],
@@ -1023,7 +1025,7 @@ summary(results)
 
 ## Visualisierung
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 {svg(mk("tunedRF/tunedRFrfs.svg"), width = 15.5, height = 7)
 plot(tunedRF)
 dev.off()}
@@ -1071,7 +1073,7 @@ saveAsSVG((tunedRFplot | tunedRF_Error), "tunedRF/tunedRF_page.svg")
 
 Vergleich der Fehler der verwendeten Modelle in Abhängigkeit vom Stratum.
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 data |> 
   # Spalte mit allen 6 Modelltypen hinzufügen
   pivot_longer(cols=c("errlinModel", 
@@ -1155,7 +1157,7 @@ saveAsSVG(vergAllModels, "diskussion/VergleichAlleModelle.svg")
 
 Vergleich der Abweichung von der Diagonalen.
 
-```{r}
+```{r, results='hide', fig.show='hide'}
 data |> 
   # Dataframe umgestalten. Spalte mit modelltyp hinzufügen.
   pivot_longer(cols=c("linModel", 
@@ -1183,7 +1185,7 @@ data |>
 
 # Finale
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, results='hide', fig.show='hide'}
 # Abspeichern des data-Dataframes als csv-Datei
 write.csv(data, file.path("Data", "DATA.csv"))
 # Abspeichern des data-Dataframes als shape-Datei
